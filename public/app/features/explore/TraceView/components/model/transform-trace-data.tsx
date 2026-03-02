@@ -187,6 +187,25 @@ export default function transformTraceData(data: TraceResponse | undefined): Tra
     });
     spans.push(span);
   });
+
+  // Compute descendantCount: spans are in DFS order, so all descendants of span[i]
+  // are the contiguous range of spans after i with depth > span[i].depth.
+  // Use a monotonic stack for O(n) computation.
+  const endIndex = new Array(spans.length);
+  const depthStack: number[] = [];
+  for (let i = 0; i < spans.length; i++) {
+    while (depthStack.length > 0 && spans[depthStack[depthStack.length - 1]].depth >= spans[i].depth) {
+      endIndex[depthStack.pop()!] = i;
+    }
+    depthStack.push(i);
+  }
+  while (depthStack.length > 0) {
+    endIndex[depthStack.pop()!] = spans.length;
+  }
+  for (let i = 0; i < spans.length; i++) {
+    spans[i].descendantCount = endIndex[i] - i - 1;
+  }
+
   const traceName = getTraceName(spans);
   const services = Object.keys(svcCounts).map((name) => ({ name, numberOfSpans: svcCounts[name] }));
   return {

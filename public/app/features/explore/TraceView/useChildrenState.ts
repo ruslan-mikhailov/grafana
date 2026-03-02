@@ -1,12 +1,19 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { TraceSpan } from './components/types/trace';
 
 /**
  * Children state means whether spans are collapsed or not. Also provides some functions to manipulate that state.
  */
-export function useChildrenState() {
-  const [childrenHiddenIDs, setChildrenHiddenIDs] = useState(new Set<string>());
+export function useChildrenState(initialHiddenIDs?: Set<string>) {
+  const [childrenHiddenIDs, setChildrenHiddenIDs] = useState(initialHiddenIDs ?? new Set<string>());
+
+  // Reset state when initialHiddenIDs identity changes (depth limit change)
+  useEffect(() => {
+    if (initialHiddenIDs) {
+      setChildrenHiddenIDs(initialHiddenIDs);
+    }
+  }, [initialHiddenIDs]);
 
   const expandOne = useCallback(
     function expandOne(spans: TraceSpan[]) {

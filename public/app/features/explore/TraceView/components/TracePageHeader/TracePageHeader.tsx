@@ -82,6 +82,9 @@ export type TracePageHeaderProps = {
   updateViewRangeTime: TUpdateViewRangeTimeFunction;
   viewRange: ViewRange;
   hideHeaderDetails?: boolean;
+  depthLimit?: number | null;
+  onShowFullTrace?: () => void;
+  totalSpanCount?: number;
 };
 
 export const TracePageHeader = memo((props: TracePageHeaderProps) => {
@@ -103,6 +106,9 @@ export const TracePageHeader = memo((props: TracePageHeaderProps) => {
     updateViewRangeTime,
     viewRange,
     hideHeaderDetails = false,
+    depthLimit,
+    onShowFullTrace,
+    totalSpanCount,
   } = props;
 
   const styles = useStyles2(getStyles);
@@ -342,6 +348,11 @@ export const TracePageHeader = memo((props: TracePageHeaderProps) => {
               <span className={styles.metadataValue}>{serviceCount}</span>
             </div>
 
+            <div className={styles.metadataItem}>
+              <span className={styles.metadataLabel}>{t('explore.trace-page-header.spans', 'Spans')}</span>
+              <span className={styles.metadataValue}>{totalSpanCount ?? trace.spans.length}</span>
+            </div>
+
             {url && url.length > 0 && (
               <div className={styles.metadataItem}>
                 <span className={styles.metadataLabel}>
@@ -378,6 +389,27 @@ export const TracePageHeader = memo((props: TracePageHeaderProps) => {
               </div>
             )}
           </div>
+
+          {depthLimit != null && (
+            <div className={styles.depthLimitBanner}>
+              <Icon name="info-circle" size="sm" />
+              <span>
+                {t(
+                  'explore.trace-page-header.depth-limit-info',
+                  'Showing {{depthLimit}} levels of depth ({{totalSpanCount}} total spans)',
+                  { depthLimit, totalSpanCount: totalSpanCount ?? trace.spans.length }
+                )}
+              </span>
+              <Button size="sm" variant="secondary" fill="outline" onClick={onShowFullTrace}>
+                {(totalSpanCount ?? trace.spans.length) > 10_000
+                  ? t(
+                      'explore.trace-page-header.show-full-trace-warning',
+                      'Show full trace (may be slow)'
+                    )
+                  : t('explore.trace-page-header.show-full-trace', 'Show full trace')}
+              </Button>
+            </div>
+          )}
 
           <CollapsableSection
             label={<span className={styles.overviewLabel}>{t('explore.trace-page-header.overview', 'Overview')}</span>}
@@ -547,6 +579,17 @@ const getStyles = (theme: GrafanaTheme2) => {
       whiteSpace: 'nowrap',
       display: 'inline-block',
       color: theme.colors.text.primary,
+    }),
+    depthLimitBanner: css({
+      display: 'flex',
+      alignItems: 'center',
+      gap: theme.spacing(1),
+      padding: theme.spacing(1),
+      marginTop: theme.spacing(1),
+      backgroundColor: theme.colors.info.transparent,
+      borderRadius: theme.shape.radius.default,
+      fontSize: theme.typography.bodySmall.fontSize,
+      color: theme.colors.info.text,
     }),
     overviewLabel: css({
       fontSize: theme.typography.bodySmall.fontSize,

@@ -305,6 +305,18 @@ const getStyles = stylesFactory((theme: GrafanaTheme2, showSpanFilterMatchesOnly
       label: 'labelLeft',
       right: '100%',
     }),
+    descendantBadge: css({
+      label: 'descendantBadge',
+      backgroundColor: theme.colors.info.transparent,
+      color: theme.colors.info.text,
+      borderRadius: theme.shape.radius.pill,
+      padding: '0 6px',
+      marginLeft: '4px',
+      fontSize: '0.75em',
+      fontWeight: theme.typography.fontWeightMedium,
+      lineHeight: '18px',
+      whiteSpace: 'nowrap',
+    }),
   };
 });
 
@@ -351,6 +363,7 @@ export type SpanBarRowProps = {
   datasourceType: string;
   visibleSpanIds: string[];
   criticalPath: CriticalPathSection[];
+  collapsedDescendantCount?: number;
 };
 
 const UnthemedSpanBarRow = React.memo<SpanBarRowProps>((props) => {
@@ -384,6 +397,7 @@ const UnthemedSpanBarRow = React.memo<SpanBarRowProps>((props) => {
     criticalPath,
     onDetailToggled,
     onChildrenToggled,
+    collapsedDescendantCount,
   } = props;
 
   const {
@@ -526,6 +540,9 @@ const UnthemedSpanBarRow = React.memo<SpanBarRowProps>((props) => {
             )}
             <span className={styles.endpointName}>{rpc ? rpc.operationName : operationName}</span>
             <span className={styles.endpointName}> {getSpanBarLabel(span, spanBarOptions, label)}</span>
+            {!isChildrenExpanded && collapsedDescendantCount != null && collapsedDescendantCount > 0 && (
+              <span className={styles.descendantBadge}>+{collapsedDescendantCount} spans</span>
+            )}
           </button>
           {createSpanLink &&
             (() => {

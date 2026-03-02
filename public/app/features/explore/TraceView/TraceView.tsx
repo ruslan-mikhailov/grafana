@@ -39,6 +39,7 @@ import { SpanLinkFunc } from './components/types/links';
 import { Trace } from './components/types/trace';
 import { createSpanLinkFactory } from './createSpanLink';
 import { useChildrenState } from './useChildrenState';
+import { useDepthLimit } from './useDepthLimit';
 import { useDetailState } from './useDetailState';
 import { useHoverIndentGuide } from './useHoverIndentGuide';
 import { useSearch } from './useSearch';
@@ -100,7 +101,9 @@ export function TraceView(props: Props) {
 
   const { removeHoverIndentGuideId, addHoverIndentGuideId, hoverIndentGuideIds } = useHoverIndentGuide();
   const { viewRange, updateViewRangeTime, updateNextViewRangeTime } = useViewRange();
-  const { expandOne, collapseOne, childrenToggle, collapseAll, childrenHiddenIDs, expandAll } = useChildrenState();
+  const { depthLimit, initialHiddenIDs, showFullTrace, setDepthLimit } = useDepthLimit(traceProp?.spans);
+  const { expandOne, collapseOne, childrenToggle, collapseAll, childrenHiddenIDs, expandAll } =
+    useChildrenState(initialHiddenIDs);
 
   const criticalPath = useMemo(() => memoizedTraceCriticalPath(traceProp), [traceProp]);
   const { search, setSearch, spanFilterMatches } = useSearch(exploreId, traceProp?.spans, spanFilters, criticalPath);
@@ -205,6 +208,9 @@ export function TraceView(props: Props) {
             updateViewRangeTime={updateViewRangeTime}
             viewRange={viewRange}
             hideHeaderDetails={hideHeaderDetails}
+            depthLimit={depthLimit}
+            onShowFullTrace={showFullTrace}
+            totalSpanCount={traceProp?.spans.length}
           />
 
           <TraceTimelineViewer

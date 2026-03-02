@@ -513,6 +513,7 @@ export class UnthemedVirtualizedTraceView extends React.Component<VirtualizedTra
           showServiceName={prevSpan === null || prevSpan.process.serviceName !== span.process.serviceName}
           visibleSpanIds={visibleSpanIds}
           criticalPath={criticalPathSections}
+          collapsedDescendantCount={isCollapsed ? span.descendantCount : undefined}
         />
       </div>
     );
