@@ -33,11 +33,13 @@ import memoizedTraceCriticalPath from './components/CriticalPath';
 import { TracePageHeader } from './components/TracePageHeader/TracePageHeader';
 import TraceTimelineViewer from './components/TraceTimelineViewer';
 import { TraceFlameGraphs } from './components/TraceTimelineViewer/SpanDetail';
+import { isErrorSpan } from './components/TraceTimelineViewer/utils';
 import { SpanBarOptionsData } from './components/settings/SpanBarSettings';
 import TTraceTimeline from './components/types/TTraceTimeline';
 import { SpanLinkFunc } from './components/types/links';
 import { Trace } from './components/types/trace';
 import { createSpanLinkFactory } from './createSpanLink';
+import { expandPathsToSpans } from './expandPathsToSpans';
 import { useChildrenState } from './useChildrenState';
 import { useDepthLimit } from './useDepthLimit';
 import { useDetailState } from './useDetailState';
@@ -131,15 +133,66 @@ export function TraceView(props: Props) {
   const focusedSpanId = focusedSpanIdFromProps ?? focusedSpanIdExplore;
   const createFocusSpanLink = createFocusSpanLinkFromProps ?? createFocusSpanLinkExplore;
 
+  // Collect all spans that must be visible (errors, search matches, focused span)
+  const mustBeVisibleSpanIDs = useMemo(() => {
+    const ids = new Set<string>();
+    if (traceProp?.spans) {
+      for (const span of traceProp.spans) {
+        if (isErrorSpan(span)) {
+          ids.add(span.spanID);
+        }
+      }
+    }
+    if (spanFilterMatches) {
+      for (const id of spanFilterMatches) {
+        ids.add(id);
+      }
+    }
+    if (focusedSpanId) {
+      ids.add(focusedSpanId);
+    }
+    if (focusedSpanIdForSearch) {
+      ids.add(focusedSpanIdForSearch);
+    }
+    return ids;
+  }, [traceProp?.spans, spanFilterMatches, focusedSpanId, focusedSpanIdForSearch]);
+
+  // Derive effective hidden IDs by expanding paths to must-be-visible spans
+  const effectiveHiddenIDs = useMemo(() => {
+    return expandPathsToSpans(traceProp?.spans ?? [], childrenHiddenIDs, mustBeVisibleSpanIDs);
+  }, [traceProp?.spans, childrenHiddenIDs, mustBeVisibleSpanIDs]);
+
+  // Count visible spans (mirrors generateRowStates collapse logic)
+  const visibleSpanCount = useMemo(() => {
+    if (!traceProp?.spans) {
+      return 0;
+    }
+    let count = 0;
+    let collapseDepth: number | null = null;
+    for (const span of traceProp.spans) {
+      if (collapseDepth != null) {
+        if (span.depth >= collapseDepth) {
+          continue;
+        }
+        collapseDepth = null;
+      }
+      count++;
+      if (effectiveHiddenIDs.has(span.spanID)) {
+        collapseDepth = span.depth + 1;
+      }
+    }
+    return count;
+  }, [traceProp?.spans, effectiveHiddenIDs]);
+
   const traceTimeline: TTraceTimeline = useMemo(
     () => ({
-      childrenHiddenIDs,
+      childrenHiddenIDs: effectiveHiddenIDs,
       detailStates,
       hoverIndentGuideIds,
       spanNameColumnWidth,
       traceID: props.traceProp?.traceID,
     }),
-    [childrenHiddenIDs, detailStates, hoverIndentGuideIds, spanNameColumnWidth, props.traceProp?.traceID]
+    [effectiveHiddenIDs, detailStates, hoverIndentGuideIds, spanNameColumnWidth, props.traceProp?.traceID]
   );
 
   const instanceSettings = getDatasourceSrv().getInstanceSettings(datasource?.name);
@@ -210,6 +263,8 @@ export function TraceView(props: Props) {
             hideHeaderDetails={hideHeaderDetails}
             depthLimit={depthLimit}
             onShowFullTrace={showFullTrace}
+            setDepthLimit={setDepthLimit}
+            visibleSpanCount={visibleSpanCount}
             totalSpanCount={traceProp?.spans.length}
           />
 

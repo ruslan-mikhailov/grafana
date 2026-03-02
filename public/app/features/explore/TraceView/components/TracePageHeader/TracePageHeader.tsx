@@ -84,6 +84,8 @@ export type TracePageHeaderProps = {
   hideHeaderDetails?: boolean;
   depthLimit?: number | null;
   onShowFullTrace?: () => void;
+  setDepthLimit?: (limit: number) => void;
+  visibleSpanCount?: number;
   totalSpanCount?: number;
 };
 
@@ -108,6 +110,8 @@ export const TracePageHeader = memo((props: TracePageHeaderProps) => {
     hideHeaderDetails = false,
     depthLimit,
     onShowFullTrace,
+    setDepthLimit,
+    visibleSpanCount,
     totalSpanCount,
   } = props;
 
@@ -350,7 +354,13 @@ export const TracePageHeader = memo((props: TracePageHeaderProps) => {
 
             <div className={styles.metadataItem}>
               <span className={styles.metadataLabel}>{t('explore.trace-page-header.spans', 'Spans')}</span>
-              <span className={styles.metadataValue}>{totalSpanCount ?? trace.spans.length}</span>
+              <span className={styles.metadataValue}>
+                {visibleSpanCount != null &&
+                totalSpanCount != null &&
+                visibleSpanCount !== totalSpanCount
+                  ? `${visibleSpanCount} / ${totalSpanCount}`
+                  : (totalSpanCount ?? trace.spans.length)}
+              </span>
             </div>
 
             {url && url.length > 0 && (
@@ -395,19 +405,38 @@ export const TracePageHeader = memo((props: TracePageHeaderProps) => {
               <Icon name="info-circle" size="sm" />
               <span>
                 {t(
-                  'explore.trace-page-header.depth-limit-info',
-                  'Showing {{depthLimit}} levels of depth ({{totalSpanCount}} total spans)',
-                  { depthLimit, totalSpanCount: totalSpanCount ?? trace.spans.length }
+                  'explore.trace-page-header.depth-limit-info-with-count',
+                  'Showing {{visibleCount}} of {{totalCount}} spans (depth {{depthLimit}})',
+                  {
+                    visibleCount: visibleSpanCount ?? '?',
+                    totalCount: totalSpanCount ?? trace.spans.length,
+                    depthLimit,
+                  }
                 )}
               </span>
-              <Button size="sm" variant="secondary" fill="outline" onClick={onShowFullTrace}>
-                {(totalSpanCount ?? trace.spans.length) > 10_000
-                  ? t(
-                      'explore.trace-page-header.show-full-trace-warning',
-                      'Show full trace (may be slow)'
-                    )
-                  : t('explore.trace-page-header.show-full-trace', 'Show full trace')}
-              </Button>
+              <ButtonGroup>
+                {[3, 5, 10].map((depth) => (
+                  <Button
+                    key={depth}
+                    size="sm"
+                    variant={depthLimit === depth ? 'primary' : 'secondary'}
+                    fill={depthLimit === depth ? 'solid' : 'outline'}
+                    onClick={() => setDepthLimit?.(depth)}
+                  >
+                    {depth}
+                  </Button>
+                ))}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  fill="outline"
+                  onClick={onShowFullTrace}
+                >
+                  {(totalSpanCount ?? trace.spans.length) > 10_000
+                    ? t('explore.trace-page-header.depth-all-slow', 'All (slow)')
+                    : t('explore.trace-page-header.depth-all', 'All')}
+                </Button>
+              </ButtonGroup>
             </div>
           )}
 
