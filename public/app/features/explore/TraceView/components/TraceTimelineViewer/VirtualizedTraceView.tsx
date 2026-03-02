@@ -34,6 +34,7 @@ import { TraceSpan, Trace, TraceSpanReference, CriticalPathSection } from '../ty
 import { getColorByKey } from '../utils/color-generator';
 
 import ListView from './ListView';
+import SiblingSummaryRow from './SiblingSummaryRow';
 import SpanBarRow from './SpanBarRow';
 import { TraceFlameGraphs } from './SpanDetail';
 import DetailState from './SpanDetail/DetailState';
@@ -72,6 +73,11 @@ type RowState = {
   isDetail: boolean;
   span: TraceSpan;
   spanIndex: number;
+  // Pagination-only fields:
+  isSiblingPagination?: boolean;
+  paginationParentSpanID?: string;
+  paginationPosition?: 'above' | 'below';
+  paginationHiddenCount?: number;
 };
 
 type TVirtualizedTraceViewOwnProps = {
@@ -113,6 +119,10 @@ type TVirtualizedTraceViewOwnProps = {
   setRedrawListView: (redraw: {}) => void;
   timeRange: TimeRange;
   app: CoreApp;
+  siblingWindows?: Map<string, number>;
+  siblingThreshold?: number;
+  siblingPageSize?: number;
+  shiftSiblingWindow?: (parentSpanID: string, delta: number) => void;
 };
 
 export type VirtualizedTraceViewProps = TVirtualizedTraceViewOwnProps & TTraceTimeline;
@@ -122,10 +132,21 @@ export const DEFAULT_HEIGHTS = {
   bar: 28,
   detail: 161,
   detailWithLogs: 197,
+  siblingPagination: 24,
 };
 
 const NUM_TICKS = 5;
 const BUFFER_SIZE = 33;
+
+type PaginationContext = {
+  parentSpanID: string;
+  childCount: number;
+  windowStart: number;
+  windowEnd: number;
+  currentChildIndex: number;
+  childDepth: number;
+  afterSummaryEmitted: boolean;
+};
 
 function generateRowStates(
   spans: TraceSpan[] | TNil,
@@ -133,7 +154,10 @@ function generateRowStates(
   detailStates: Map<string, DetailState | TNil>,
   findMatchesIDs: Set<string> | TNil,
   showSpanFilterMatchesOnly: boolean,
-  criticalPath: CriticalPathSection[]
+  criticalPath: CriticalPathSection[],
+  siblingWindows?: Map<string, number>,
+  siblingThreshold?: number,
+  siblingPageSize?: number
 ): RowState[] {
   if (!spans) {
     return [];
@@ -144,11 +168,50 @@ function generateRowStates(
     spans = spans.filter((span) => findMatchesIDs.has(span.spanID));
   }
 
-  let collapseDepth = null;
-  const rowStates = [];
+  const threshold = siblingThreshold ?? 50;
+  const pageSize = siblingPageSize ?? 20;
+  const usePagination = !showSpanFilterMatchesOnly && siblingWindows != null;
+
+  let collapseDepth: number | null = null;
+  let paginationSkipDepth: number | null = null;
+  const paginationStack: PaginationContext[] = [];
+  const rowStates: RowState[] = [];
+
   for (let i = 0; i < spans.length; i++) {
     const span = spans[i];
     const { spanID, depth } = span;
+
+    // 1. Pop stale pagination contexts
+    if (usePagination) {
+      while (paginationStack.length > 0) {
+        const ctx = paginationStack[paginationStack.length - 1];
+        if (depth < ctx.childDepth) {
+          // Emit "below" summary if we haven't yet and there are hidden children after the window
+          if (!ctx.afterSummaryEmitted && ctx.windowEnd < ctx.childCount) {
+            const hiddenAfter = ctx.childCount - ctx.windowEnd;
+            rowStates.push({
+              span: span, // boundary sibling for indentation
+              isDetail: false,
+              spanIndex: i,
+              isSiblingPagination: true,
+              paginationParentSpanID: ctx.parentSpanID,
+              paginationPosition: 'below',
+              paginationHiddenCount: hiddenAfter,
+            });
+          }
+          paginationStack.pop();
+        } else {
+          break;
+        }
+      }
+
+      // Clear paginationSkipDepth if we've ascended above it
+      if (paginationSkipDepth != null && depth < paginationSkipDepth) {
+        paginationSkipDepth = null;
+      }
+    }
+
+    // 2. Collapse check (existing collapseDepth logic, unchanged)
     let hidden = false;
     if (collapseDepth != null) {
       if (depth >= collapseDepth) {
@@ -160,9 +223,81 @@ function generateRowStates(
     if (hidden) {
       continue;
     }
+
+    // 3. Pagination skip check
+    if (usePagination && paginationSkipDepth != null && depth >= paginationSkipDepth) {
+      continue;
+    }
+
+    // 4. Pagination sibling check (if direct child of paginated parent)
+    if (usePagination && paginationStack.length > 0) {
+      const ctx = paginationStack[paginationStack.length - 1];
+      if (depth === ctx.childDepth) {
+        const childIdx = ctx.currentChildIndex;
+        ctx.currentChildIndex++;
+
+        // Emit "above" summary row before the first visible child
+        if (childIdx === ctx.windowStart && ctx.windowStart > 0) {
+          rowStates.push({
+            span,
+            isDetail: false,
+            spanIndex: i,
+            isSiblingPagination: true,
+            paginationParentSpanID: ctx.parentSpanID,
+            paginationPosition: 'above',
+            paginationHiddenCount: ctx.windowStart,
+          });
+        }
+
+        if (childIdx < ctx.windowStart) {
+          // Before window — skip this span and all its descendants
+          paginationSkipDepth = depth + 1;
+          continue;
+        }
+
+        if (childIdx >= ctx.windowEnd) {
+          // After window — emit "below" summary row on the first out-of-window child
+          if (!ctx.afterSummaryEmitted) {
+            ctx.afterSummaryEmitted = true;
+            const hiddenAfter = ctx.childCount - ctx.windowEnd;
+            rowStates.push({
+              span,
+              isDetail: false,
+              spanIndex: i,
+              isSiblingPagination: true,
+              paginationParentSpanID: ctx.parentSpanID,
+              paginationPosition: 'below',
+              paginationHiddenCount: hiddenAfter,
+            });
+          }
+          paginationSkipDepth = depth + 1;
+          continue;
+        }
+
+        // In window — fall through to normal processing
+      }
+    }
+
+    // 5. Push pagination context if this span qualifies as a paginated parent
+    if (usePagination && span.childSpanCount >= threshold && !childrenHiddenIDs.has(spanID)) {
+      const windowStart = siblingWindows!.get(spanID) ?? 0;
+      paginationStack.push({
+        parentSpanID: spanID,
+        childCount: span.childSpanCount,
+        windowStart,
+        windowEnd: Math.min(windowStart + pageSize, span.childSpanCount),
+        currentChildIndex: 0,
+        childDepth: depth + 1,
+        afterSummaryEmitted: false,
+      });
+    }
+
+    // 6. User collapse check (childrenHiddenIDs, set collapseDepth)
     if (childrenHiddenIDs.has(spanID)) {
       collapseDepth = depth + 1;
     }
+
+    // 7. Emit span row + optional detail row (existing)
     rowStates.push({
       span,
       isDetail: false,
@@ -176,6 +311,27 @@ function generateRowStates(
       });
     }
   }
+
+  // Flush remaining "below" summaries for any open pagination contexts
+  if (usePagination) {
+    for (const ctx of paginationStack) {
+      if (!ctx.afterSummaryEmitted && ctx.windowEnd < ctx.childCount) {
+        const hiddenAfter = ctx.childCount - ctx.windowEnd;
+        // Use the last span as a boundary reference
+        const lastSpan = spans[spans.length - 1];
+        rowStates.push({
+          span: lastSpan,
+          isDetail: false,
+          spanIndex: spans.length - 1,
+          isSiblingPagination: true,
+          paginationParentSpanID: ctx.parentSpanID,
+          paginationPosition: 'below',
+          paginationHiddenCount: hiddenAfter,
+        });
+      }
+    }
+  }
+
   return rowStates;
 }
 
@@ -193,7 +349,10 @@ function generateRowStatesFromTrace(
   detailStates: Map<string, DetailState | TNil>,
   findMatchesIDs: Set<string> | TNil,
   showSpanFilterMatchesOnly: boolean,
-  criticalPath: CriticalPathSection[]
+  criticalPath: CriticalPathSection[],
+  siblingWindows?: Map<string, number>,
+  siblingThreshold?: number,
+  siblingPageSize?: number
 ): RowState[] {
   return trace
     ? generateRowStates(
@@ -202,7 +361,10 @@ function generateRowStatesFromTrace(
         detailStates,
         findMatchesIDs,
         showSpanFilterMatchesOnly,
-        criticalPath
+        criticalPath,
+        siblingWindows,
+        siblingThreshold,
+        siblingPageSize
       )
     : [];
 }
@@ -263,15 +425,27 @@ export class UnthemedVirtualizedTraceView extends React.Component<VirtualizedTra
   }
 
   getRowStates(): RowState[] {
-    const { childrenHiddenIDs, detailStates, trace, findMatchesIDs, showSpanFilterMatchesOnly, criticalPath } =
-      this.props;
+    const {
+      childrenHiddenIDs,
+      detailStates,
+      trace,
+      findMatchesIDs,
+      showSpanFilterMatchesOnly,
+      criticalPath,
+      siblingWindows,
+      siblingThreshold,
+      siblingPageSize,
+    } = this.props;
     return memoizedGenerateRowStates(
       trace,
       childrenHiddenIDs,
       detailStates,
       findMatchesIDs,
       showSpanFilterMatchesOnly,
-      criticalPath
+      criticalPath,
+      siblingWindows,
+      siblingThreshold,
+      siblingPageSize
     );
   }
 
@@ -325,12 +499,16 @@ export class UnthemedVirtualizedTraceView extends React.Component<VirtualizedTra
   mapSpanIndexToRowIndex = (index: number) => {
     const max = this.getRowStates().length;
     for (let i = 0; i < max; i++) {
-      const { spanIndex } = this.getRowStates()[i];
-      if (spanIndex === index) {
+      const row = this.getRowStates()[i];
+      if (row.isSiblingPagination) {
+        continue;
+      }
+      if (row.spanIndex === index) {
         return i;
       }
     }
-    throw new Error(`unable to find row for span index: ${index}`);
+    // Return -1 for spans that are paginated away (outside the visible window)
+    return -1;
   };
 
   setListView = (listView: ListView | TNil) => {
@@ -340,11 +518,29 @@ export class UnthemedVirtualizedTraceView extends React.Component<VirtualizedTra
   // use long form syntax to avert flow error
   // https://github.com/facebook/flow/issues/3076#issuecomment-290944051
   getKeyFromIndex = (index: number) => {
-    const { isDetail, span } = this.getRowStates()[index];
+    const row = this.getRowStates()[index];
+    if (row.isSiblingPagination) {
+      return `${row.paginationParentSpanID}--pagination-${row.paginationPosition}`;
+    }
+    const { isDetail, span } = row;
     return `${span.traceID}--${span.spanID}--${isDetail ? 'detail' : 'bar'}`;
   };
 
   getIndexFromKey = (key: string) => {
+    // Check for pagination keys
+    if (key.includes('--pagination-')) {
+      const max = this.getRowStates().length;
+      for (let i = 0; i < max; i++) {
+        const row = this.getRowStates()[i];
+        if (row.isSiblingPagination) {
+          const rowKey = `${row.paginationParentSpanID}--pagination-${row.paginationPosition}`;
+          if (rowKey === key) {
+            return i;
+          }
+        }
+      }
+      return -1;
+    }
     const parts = key.split('--');
     const _traceID = parts[0];
     const _spanID = parts[1];
@@ -360,7 +556,11 @@ export class UnthemedVirtualizedTraceView extends React.Component<VirtualizedTra
   };
 
   getRowHeight = (index: number) => {
-    const { span, isDetail } = this.getRowStates()[index];
+    const row = this.getRowStates()[index];
+    if (row.isSiblingPagination) {
+      return DEFAULT_HEIGHTS.siblingPagination;
+    }
+    const { span, isDetail } = row;
     if (!isDetail) {
       return DEFAULT_HEIGHTS.bar;
     }
@@ -371,12 +571,17 @@ export class UnthemedVirtualizedTraceView extends React.Component<VirtualizedTra
   };
 
   renderRow = (key: string, style: React.CSSProperties, index: number, attrs: {}) => {
-    const { isDetail, span, spanIndex } = this.getRowStates()[index];
+    const row = this.getRowStates()[index];
+    const { isDetail, span, spanIndex } = row;
 
     // Compute the list of currently visible span IDs to pass to the row renderers.
     const start = Math.max((this.listView?.getTopVisibleIndex() || 0) - BUFFER_SIZE, 0);
     const end = (this.listView?.getBottomVisibleIndex() || 0) + BUFFER_SIZE;
     const visibleSpanIds = this.getVisibleSpanIds(start, end);
+
+    if (row.isSiblingPagination) {
+      return this.renderSiblingPaginationRow(row, key, style, attrs, visibleSpanIds);
+    }
 
     return isDetail
       ? this.renderSpanDetailRow(span, key, style, attrs, visibleSpanIds)
@@ -387,11 +592,39 @@ export class UnthemedVirtualizedTraceView extends React.Component<VirtualizedTra
     if (spanID == null) {
       return;
     }
-    const i = this.getRowStates().findIndex((row) => row.span.spanID === spanID);
+    const i = this.getRowStates().findIndex((row) => !row.isSiblingPagination && row.span.spanID === spanID);
     if (i >= 0) {
       this.listView?.scrollToIndex(i, headerHeight);
     }
   };
+
+  renderSiblingPaginationRow(
+    row: RowState,
+    key: string,
+    style: React.CSSProperties,
+    attrs: {},
+    visibleSpanIds: string[]
+  ) {
+    const { spanNameColumnWidth, hoverIndentGuideIds, addHoverIndentGuideId, removeHoverIndentGuideId, shiftSiblingWindow } =
+      this.props;
+    const styles = getStyles();
+    return (
+      <div className={styles.row} key={key} style={style} {...attrs}>
+        <SiblingSummaryRow
+          parentSpanID={row.paginationParentSpanID!}
+          position={row.paginationPosition!}
+          hiddenCount={row.paginationHiddenCount!}
+          span={row.span}
+          columnDivision={spanNameColumnWidth}
+          onShiftWindow={shiftSiblingWindow!}
+          hoverIndentGuideIds={hoverIndentGuideIds}
+          addHoverIndentGuideId={addHoverIndentGuideId}
+          removeHoverIndentGuideId={removeHoverIndentGuideId}
+          visibleSpanIds={visibleSpanIds}
+        />
+      </div>
+    );
+  }
 
   renderSpanBarRow(
     span: TraceSpan,

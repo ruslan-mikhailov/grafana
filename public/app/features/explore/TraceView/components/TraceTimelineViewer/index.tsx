@@ -113,6 +113,10 @@ export type TProps = {
   setRedrawListView: (redraw: {}) => void;
   timeRange: TimeRange;
   app: CoreApp;
+  siblingWindows?: Map<string, number>;
+  siblingThreshold?: number;
+  siblingPageSize?: number;
+  shiftSiblingWindow?: (parentSpanID: string, delta: number) => void;
 };
 
 type State = {

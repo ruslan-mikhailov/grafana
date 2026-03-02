@@ -45,6 +45,7 @@ import { useDepthLimit } from './useDepthLimit';
 import { useDetailState } from './useDetailState';
 import { useHoverIndentGuide } from './useHoverIndentGuide';
 import { useSearch } from './useSearch';
+import { useSiblingPagination } from './useSiblingPagination';
 import { useViewRange } from './useViewRange';
 
 const getStyles = (theme: GrafanaTheme2) => ({
@@ -156,6 +157,14 @@ export function TraceView(props: Props) {
     }
     return ids;
   }, [traceProp?.spans, spanFilterMatches, focusedSpanId, focusedSpanIdForSearch]);
+
+  // Sibling pagination for high fan-out spans
+  const {
+    siblingWindows,
+    shiftSiblingWindow,
+    pageSize: siblingPageSize,
+    threshold: siblingThreshold,
+  } = useSiblingPagination(traceProp, mustBeVisibleSpanIDs);
 
   // Derive effective hidden IDs by expanding paths to must-be-visible spans
   const effectiveHiddenIDs = useMemo(() => {
@@ -312,6 +321,10 @@ export function TraceView(props: Props) {
             setRedrawListView={setRedrawListView}
             timeRange={props.timeRange}
             app={exploreId ? CoreApp.Explore : CoreApp.Unknown}
+            siblingWindows={siblingWindows}
+            siblingThreshold={siblingThreshold}
+            siblingPageSize={siblingPageSize}
+            shiftSiblingWindow={shiftSiblingWindow}
           />
         </>
       ) : (
