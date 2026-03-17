@@ -382,6 +382,43 @@ describe('CompletionProvider', () => {
     }
   );
 
+  describe('Sub-query extraction for math expressions', () => {
+    it('sends sub-query to tag values API for math expressions', async () => {
+      const query = '({ .foo = "bar" } | rate()) + ({.b=} | rate())';
+      const offset = query.indexOf('{.b=}') + 4;
+      const { provider, model } = setup(query, offset, v2Tags);
+
+      const spy = jest.spyOn(provider.languageProvider, 'getOptionsV2').mockResolvedValue([
+        { type: 'string', value: 'val', label: 'val' },
+      ]);
+
+      await provider.provideCompletionItems(model, emptyPosition);
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: '{.b=} | rate()',
+        })
+      );
+    });
+
+    it('sends full query to tag values API for non-math expressions', async () => {
+      const query = '{.foo=}';
+      const { provider, model } = setup(query, 6, v2Tags);
+
+      const spy = jest.spyOn(provider.languageProvider, 'getOptionsV2').mockResolvedValue([
+        { type: 'string', value: 'bar', label: 'bar' },
+      ]);
+
+      await provider.provideCompletionItems(model, emptyPosition);
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: '{.foo=}',
+        })
+      );
+    });
+  });
+
   describe('Query hint autocompletion', () => {
     it('suggests most_recent parameter inside with clause', async () => {
       const { provider, model } = setup('{.foo=300} with(', 17);

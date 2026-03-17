@@ -1,4 +1,4 @@
-import { getSituation, type SituationType } from './situation';
+import { extractSubQueryAtCursor, getSituation, type SituationType } from './situation';
 
 jest.mock('@grafana/runtime', () => ({
   ...jest.requireActual('@grafana/runtime'),
@@ -113,7 +113,58 @@ describe('situation', () => {
   tests.forEach((test) => {
     it(`${test.query} at ${test.cursorPos} is ${test.expected.type}`, async () => {
       const sit = getSituation(test.query, test.cursorPos);
-      expect(sit).toEqual({ ...test.expected, query: test.query });
+      expect(sit).toEqual({ ...test.expected, query: test.query, subQuery: test.query });
     });
+  });
+});
+
+describe('extractSubQueryAtCursor', () => {
+  it('returns full text for simple query without parens', () => {
+    expect(extractSubQueryAtCursor('{ .b = }', 5)).toBe('{ .b = }');
+  });
+
+  it('returns full text for simple pipeline without parens', () => {
+    expect(extractSubQueryAtCursor('{ .b = } | rate()', 5)).toBe('{ .b = } | rate()');
+  });
+
+  it('extracts first operand from math expression', () => {
+    const q = '({ .foo = } | rate()) + ({ .b = "val" } | rate())';
+    expect(extractSubQueryAtCursor(q, 7)).toBe('{ .foo = } | rate()');
+  });
+
+  it('extracts second operand from math expression', () => {
+    const q = '({ .foo = "bar" } | rate()) + ({ .b = } | rate())';
+    const offset = q.indexOf('.b =') + 2;
+    expect(extractSubQueryAtCursor(q, offset)).toBe('{ .b = } | rate()');
+  });
+
+  it('extracts innermost operand from nested math expression', () => {
+    const q = '(({ .a = } | rate()) + ({ .b } | rate())) / ({ .c = } | rate())';
+    const offset = q.indexOf('.a =') + 2;
+    expect(extractSubQueryAtCursor(q, offset)).toBe('{ .a = } | rate()');
+  });
+
+  it('extracts outer operand from nested math expression', () => {
+    const q = '(({ .a } | rate()) + ({ .b } | rate())) / ({ .c = } | rate())';
+    const offset = q.indexOf('.c =') + 2;
+    expect(extractSubQueryAtCursor(q, offset)).toBe('{ .c = } | rate()');
+  });
+
+  it('handles parens inside quoted strings', () => {
+    const q = '({ .foo = "(bar)" } | rate()) + ({ .b = } | rate())';
+    const offset = q.indexOf('.b =') + 2;
+    expect(extractSubQueryAtCursor(q, offset)).toBe('{ .b = } | rate()');
+  });
+
+  it('handles braces inside quoted strings', () => {
+    const q = '({ .a = "{foo}" } | rate()) + ({ .b = } | rate())';
+    const offset = q.indexOf('.b =') + 2;
+    expect(extractSubQueryAtCursor(q, offset)).toBe('{ .b = } | rate()');
+  });
+
+  it('handles cursor inside quoted string with parens', () => {
+    const q = '({ .a = "value with (parens)" } | rate()) + ({ .b } | rate())';
+    const offset = q.indexOf('value') + 3;
+    expect(extractSubQueryAtCursor(q, offset)).toBe('{ .a = "value with (parens)" } | rate()');
   });
 });

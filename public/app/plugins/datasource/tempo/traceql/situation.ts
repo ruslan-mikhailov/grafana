@@ -26,7 +26,7 @@ import {
 type Direction = 'parent' | 'firstChild' | 'lastChild' | 'nextSibling' | 'prevSibling';
 type NodeType = number;
 
-export type Situation = { query: string } & SituationType;
+export type Situation = { query: string; subQuery: string } & SituationType;
 
 export type SituationType =
   | {
@@ -152,6 +152,7 @@ export function getSituation(text: string, offset: number): Situation | null {
   if (text === '') {
     return {
       query: text,
+      subQuery: text,
       type: 'EMPTY',
     };
   }
@@ -163,6 +164,7 @@ export function getSituation(text: string, offset: number): Situation | null {
   if (/\bwith\s*\(\s*$/.test(textUpToOffset)) {
     return {
       query: text,
+      subQuery: text,
       type: 'QUERY_HINT_NAME',
     };
   }
@@ -171,6 +173,7 @@ export function getSituation(text: string, offset: number): Situation | null {
   if (/\bwith\s*\(\s*\w+\s*=\s*[\w]*$/.test(textUpToOffset)) {
     return {
       query: text,
+      subQuery: text,
       type: 'QUERY_HINT_VALUE',
     };
   }
@@ -214,7 +217,7 @@ export function getSituation(text: string, offset: number): Situation | null {
     }
   }
 
-  return { query: text, ...(situationType ?? { type: 'UNKNOWN' }) };
+  return { query: text, subQuery: extractSubQueryAtCursor(text, offset), ...(situationType ?? { type: 'UNKNOWN' }) };
 }
 
 const ERROR_NODE_ID = 0;
@@ -487,4 +490,52 @@ function resolveSpansetWithNoClosedBrace(node: SyntaxNode, text: string, origina
   return {
     type: 'SPANSET_EXPRESSION_OPERATORS_WITH_MISSING_CLOSED_BRACE',
   };
+}
+
+/**
+ * Extract the sub-query around the cursor from a TraceQL expression that may
+ * contain math operators. For simple queries (no top-level math), returns
+ * the full text. For math expressions like:
+ *   ({ .foo = "bar" } | rate()) + ({ .b = } | rate())
+ * returns just the sub-expression containing the cursor, e.g.:
+ *   { .b = } | rate()
+ */
+export function extractSubQueryAtCursor(text: string, offset: number): string {
+  const stack: number[] = [];
+  let inQuote = false;
+  let bestStart = -1;
+  let bestEnd = -1;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    // Handle quote toggling (skip escaped quotes)
+    if (ch === '"' && (i === 0 || text[i - 1] !== '\\')) {
+      inQuote = !inQuote;
+      continue;
+    }
+
+    if (inQuote) {
+      continue;
+    }
+
+    if (ch === '(') {
+      stack.push(i);
+    } else if (ch === ')') {
+      const openPos = stack.pop();
+      if (openPos !== undefined && openPos < offset && i >= offset) {
+        // This balanced group contains the cursor — keep the tightest (innermost) match
+        if (openPos > bestStart) {
+          bestStart = openPos;
+          bestEnd = i;
+        }
+      }
+    }
+  }
+
+  if (bestStart === -1) {
+    return text;
+  }
+
+  return text.slice(bestStart + 1, bestEnd).trim();
 }
