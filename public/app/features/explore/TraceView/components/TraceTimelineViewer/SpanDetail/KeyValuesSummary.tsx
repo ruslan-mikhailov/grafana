@@ -1,13 +1,28 @@
 import { css } from '@emotion/css';
 
-import { type GrafanaTheme2, type TraceKeyValuePair } from '@grafana/data';
+import { useSyncExternalStore } from 'react';
+
+import {
+  getProtectedAttributeDisplayEpoch,
+  getProtectedAttributeDisplayValue,
+  subscribeProtectedAttributeDisplay,
+  type GrafanaTheme2,
+  type TraceKeyValuePair,
+} from '@grafana/data';
 import { useStyles2 } from '@grafana/ui';
 
 export type KeyValuesSummaryProps = {
   data?: TraceKeyValuePair[] | null;
+  datasourceType?: string;
+  isSpanAttribute?: boolean;
 };
 
-export function KeyValuesSummary({ data = null }: KeyValuesSummaryProps) {
+export function KeyValuesSummary({ data = null, datasourceType, isSpanAttribute }: KeyValuesSummaryProps) {
+  useSyncExternalStore(
+    subscribeProtectedAttributeDisplay,
+    getProtectedAttributeDisplayEpoch,
+    getProtectedAttributeDisplayEpoch
+  );
   const styles = useStyles2(getStyles);
 
   if (!Array.isArray(data) || !data.length) {
@@ -20,7 +35,11 @@ export function KeyValuesSummary({ data = null }: KeyValuesSummaryProps) {
         // `i` is necessary in the key because item.key can repeat
         <li className={styles.summaryItem} key={`${item.key}-${i}`}>
           <span className={styles.summaryLabel}>{item.key}</span>
-          {String(item.value)}
+          {String(
+            (datasourceType === 'tempo' && isSpanAttribute
+              ? getProtectedAttributeDisplayValue(item.key, item.value)
+              : undefined) ?? item.value
+          )}
         </li>
       ))}
     </ul>

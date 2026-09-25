@@ -179,6 +179,11 @@ export {
 } from './field/fieldDisplay';
 export { getDisplayProcessor, getRawDisplayProcessor } from './field/displayProcessor';
 export {
+  getProtectedAttributeDisplayValue,
+  getProtectedAttributeDisplayEpoch,
+  subscribeProtectedAttributeDisplay,
+} from './field/protectedAttributeDisplay';
+export {
   type StandardEditorContext,
   type StandardEditorProps,
   type StandardEditorsRegistryItem,

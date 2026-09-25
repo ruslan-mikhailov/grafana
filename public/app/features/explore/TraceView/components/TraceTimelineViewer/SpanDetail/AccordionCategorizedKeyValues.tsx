@@ -95,7 +95,7 @@ export default function AccordionCategorizedKeyValues({
         ) : (
           showDataSummaryFields && (
             <span className={styles.summary}>
-              <KeyValuesSummary data={data} />
+              <KeyValuesSummary data={data} datasourceType={datasourceType} isSpanAttribute={sectionType === 'span'} />
             </span>
           )
         )}
@@ -108,6 +108,7 @@ export default function AccordionCategorizedKeyValues({
             linksGetter={linksGetter}
             promoGetter={promoGetter}
             datasourceType={datasourceType}
+            isSpanAttribute={sectionType === 'span'}
             openLinksInSameTab={openLinksInSameTab}
           />
         ) : (
@@ -143,6 +144,7 @@ export default function AccordionCategorizedKeyValues({
                         linksGetter={linksGetter}
                         promoGetter={promoGetter}
                         datasourceType={datasourceType}
+                        isSpanAttribute={sectionType === 'span'}
                         openLinksInSameTab={openLinksInSameTab}
                       />
                     </div>

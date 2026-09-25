@@ -1,8 +1,14 @@
 import { css } from '@emotion/css';
 import { clsx } from 'clsx';
 import memoize from 'micro-memoize';
+import { useSyncExternalStore } from 'react';
 
-import { formattedValueToString } from '@grafana/data';
+import {
+  formattedValueToString,
+  getProtectedAttributeDisplayEpoch,
+  getProtectedAttributeDisplayValue,
+  subscribeProtectedAttributeDisplay,
+} from '@grafana/data';
 
 import { MaybeWrapWithLink } from '../components/MaybeWrapWithLink';
 import { TABLE } from '../constants';
@@ -10,8 +16,13 @@ import { getActiveCellSelector, isTableCellStylesKeyEqual } from '../styles';
 import { type AutoCellProps, type TableCellStyleOptions, type TableCellStyles } from '../types';
 
 export function AutoCell({ value, field, rowIdx }: AutoCellProps) {
-  const displayValue = field.display!(value);
-  const formattedValue = formattedValueToString(displayValue);
+  useSyncExternalStore(
+    subscribeProtectedAttributeDisplay,
+    getProtectedAttributeDisplayEpoch,
+    getProtectedAttributeDisplayEpoch
+  );
+  const formattedValue =
+    getProtectedAttributeDisplayValue(field.name, value) ?? formattedValueToString(field.display!(value));
   return (
     <MaybeWrapWithLink field={field} rowIdx={rowIdx}>
       {formattedValue}

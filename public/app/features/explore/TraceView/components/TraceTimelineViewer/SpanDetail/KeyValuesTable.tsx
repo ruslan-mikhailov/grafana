@@ -23,9 +23,17 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 
-import { type GrafanaTheme2, type PluginExtensionLink, type TraceKeyValuePair } from '@grafana/data';
+import {
+  getProtectedAttributeDisplayEpoch,
+  getProtectedAttributeDisplayValue,
+  subscribeProtectedAttributeDisplay,
+  type GrafanaTheme2,
+  type PluginExtensionLink,
+  type TraceKeyValuePair,
+} from '@grafana/data';
 import { t } from '@grafana/i18n';
 import { config, reportInteraction, useReturnToPrevious } from '@grafana/runtime';
 import { Dropdown, Icon, Menu, useStyles2 } from '@grafana/ui';
@@ -351,28 +359,45 @@ export type KeyValuesTableProps = {
   promoGetter?: AttributePluginPromoGetter;
   datasourceType?: string;
   openLinksInSameTab?: boolean;
+  isSpanAttribute?: boolean;
 };
 
 export default function KeyValuesTable(props: KeyValuesTableProps) {
-  const { data, linksGetter, onlyValues, promoGetter, datasourceType, openLinksInSameTab = false } = props;
+  const { data, linksGetter, onlyValues, promoGetter, datasourceType, openLinksInSameTab = false, isSpanAttribute } = props;
+  useSyncExternalStore(
+    subscribeProtectedAttributeDisplay,
+    getProtectedAttributeDisplayEpoch,
+    getProtectedAttributeDisplayEpoch
+  );
   const styles = useStyles2(getStyles);
   return (
     <div className={cx(styles.KeyValueTable)} data-testid="KeyValueTable">
       <table className={styles.table}>
         <tbody className={styles.body}>
           {data.map((row, i) => {
+            const displayValue =
+              datasourceType === 'tempo' && isSpanAttribute
+                ? getProtectedAttributeDisplayValue(row.key, row.value)
+                : undefined;
             let html = '';
-            if (row.type === 'code') {
-              html = `<pre style="border: none; background: none">${row.value}</pre>`;
-            } else if (row.type === 'text') {
-              html = `<span style="white-space: pre-wrap;">${row.value}</span>`;
-            } else {
-              html = jsonMarkup(parseIfComplexJson(row.value));
+            if (displayValue === undefined) {
+              if (row.type === 'code') {
+                html = `<pre style="border: none; background: none">${row.value}</pre>`;
+              } else if (row.type === 'text') {
+                html = `<span style="white-space: pre-wrap;">${row.value}</span>`;
+              } else {
+                html = jsonMarkup(parseIfComplexJson(row.value));
+              }
             }
 
-            const jsonTable = (
-              <div className={styles.jsonTable} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />
-            );
+            const jsonTable =
+              displayValue === undefined ? (
+                <div className={styles.jsonTable} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />
+              ) : (
+                <div className={styles.jsonTable} style={{ whiteSpace: 'pre-wrap' }}>
+                  {displayValue}
+                </div>
+              );
             const links = linksGetter?.(data, i) ?? [];
             let valueMarkup =
               links.length > 1 ? (
@@ -406,7 +431,10 @@ export default function KeyValuesTable(props: KeyValuesTableProps) {
                 <td className={styles.copyColumn}>
                   <CopyIcon
                     className={styles.copyIcon}
-                    copyText={row.type === 'code' || row.type === 'text' ? row.value : JSON.stringify(row, null, 2)}
+                    copyText={
+                      displayValue ??
+                      (row.type === 'code' || row.type === 'text' ? row.value : JSON.stringify(row, null, 2))
+                    }
                     tooltipTitle="Copy"
                   />
                 </td>

@@ -12,12 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { locationService, reportInteraction } from '@grafana/runtime';
 
 import KeyValuesTable, { LinkValue, type KeyValuesTableProps } from './KeyValuesTable';
+
+const mockCopyTextToClipboard = jest.fn();
+jest.mock('@grafana/ui', () => ({
+  ...jest.requireActual('@grafana/ui'),
+  copyTextToClipboard: (text: string) => mockCopyTextToClipboard(text),
+}));
+
+const displayRegistrySymbol = Symbol.for('grafana.tempo.protected-attribute-display.v1');
+const encryptedValue = 'enc:v1:630dcd2966c4336691125448bbb25b4f:7aUwjY5fPtHvu_dUnzcxBJc6XQ';
 
 const mockSetReturnToPrevious = jest.fn();
 
@@ -450,5 +459,64 @@ describe('KeyValuesTable tests', () => {
 
     expect(screen.getByRole('link', { name: 'https://example.com/db' })).toBeInTheDocument();
     expect(screen.queryByTestId('attribute-plugin-promo-trigger')).not.toBeInTheDocument();
+  });
+});
+
+describe('Tempo protected span attributes', () => {
+  const originalRegistry = Reflect.get(globalThis, displayRegistrySymbol);
+
+  afterEach(() => {
+    if (originalRegistry === undefined) {
+      Reflect.deleteProperty(globalThis, displayRegistrySymbol);
+    } else {
+      Reflect.set(globalThis, displayRegistrySymbol, originalRegistry);
+    }
+    mockCopyTextToClipboard.mockClear();
+  });
+
+  it('renders plaintext only in the span value and copies it only when requested, leaving link inputs encrypted', async () => {
+    const row = { key: 'enc.secret', value: encryptedValue };
+    const rows = [row];
+    const linksGetter = jest.fn(() => []);
+    const registry = { epoch: 1, resolve: jest.fn((): string | undefined => 'abc') };
+    Reflect.set(globalThis, displayRegistrySymbol, registry);
+
+    setup({ data: rows, datasourceType: 'tempo', isSpanAttribute: true, linksGetter });
+
+    expect(screen.getByRole('cell', { name: 'abc' })).toBeInTheDocument();
+    expect(screen.queryByText(encryptedValue)).not.toBeInTheDocument();
+    expect(row.value).toBe(encryptedValue);
+    expect(linksGetter).toHaveBeenCalledWith(rows, 0);
+    expect(mockCopyTextToClipboard).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Copy to clipboard' }));
+    expect(mockCopyTextToClipboard).toHaveBeenCalledWith('abc');
+
+    registry.resolve.mockReturnValue(undefined);
+    act(() => {
+      registry.epoch++;
+      window.dispatchEvent(new Event('grafana.tempo.protected-attribute-display-change'));
+    });
+
+    expect(screen.queryByText('abc')).not.toBeInTheDocument();
+    expect(screen.getByText(encryptedValue)).toBeInTheDocument();
+    expect(row.value).toBe(encryptedValue);
+  });
+
+  it('renders decrypted HTML-like text without creating elements', () => {
+    Reflect.set(globalThis, displayRegistrySymbol, {
+      epoch: 1,
+      resolve: () => '<img src=x onerror=alert(1)>',
+    });
+
+    setup({
+      data: [{ key: 'enc.secret', value: encryptedValue }],
+      datasourceType: 'tempo',
+      isSpanAttribute: true,
+    });
+
+    const valueCell = screen.getByRole('cell', { name: '<img src=x onerror=alert(1)>' });
+    expect(valueCell).toHaveTextContent('<img src=x onerror=alert(1)>');
+    expect(valueCell.querySelector('img')).toBeNull();
   });
 });

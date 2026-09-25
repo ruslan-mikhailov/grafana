@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import AccordionCategorizedKeyValues from './AccordionCategorizedKeyValues';
@@ -8,6 +8,9 @@ const tags = [
   { key: 'http.status_code', value: '204' },
   { key: 'service.name', value: 'api' },
 ];
+
+const displayRegistrySymbol = Symbol.for('grafana.tempo.protected-attribute-display.v1');
+const encryptedValue = 'enc:v1:630dcd2966c4336691125448bbb25b4f:7aUwjY5fPtHvu_dUnzcxBJc6XQ';
 
 describe('AccordionCategorizedKeyValues', () => {
   it('renders categorized attribute sections when expanded', () => {
@@ -154,5 +157,101 @@ describe('AccordionCategorizedKeyValues', () => {
     await userEvent.click(screen.getByTestId('AccordionCategorizedKeyValues--header'));
 
     expect(onToggle).not.toHaveBeenCalled();
+  });
+});
+
+describe('protected attributes in categorized span detail', () => {
+  const originalRegistry = Reflect.get(globalThis, displayRegistrySymbol);
+
+  afterEach(() => {
+    if (originalRegistry === undefined) {
+      Reflect.deleteProperty(globalThis, displayRegistrySymbol);
+    } else {
+      Reflect.set(globalThis, displayRegistrySymbol, originalRegistry);
+    }
+  });
+
+  it('updates the collapsed and expanded Tempo span display on key changes without decrypting resource or other datasource values', () => {
+    const data = [
+      { key: 'enc.secret', value: encryptedValue },
+      { key: 'http.method', value: 'GET' },
+    ];
+    const registry = { epoch: 1, resolve: jest.fn((): string | undefined => 'abc') };
+    Reflect.set(globalThis, displayRegistrySymbol, registry);
+
+    const { rerender } = render(
+      <AccordionCategorizedKeyValues
+        data={data}
+        sectionType="span"
+        datasourceType="tempo"
+        isOpen={false}
+        label="Span attributes"
+      />
+    );
+
+    expect(screen.getByText('abc')).toBeInTheDocument();
+    expect(screen.queryByText(encryptedValue)).not.toBeInTheDocument();
+
+    registry.resolve.mockReturnValue(undefined);
+    act(() => {
+      registry.epoch++;
+      window.dispatchEvent(new Event('grafana.tempo.protected-attribute-display-change'));
+    });
+    expect(screen.queryByText('abc')).not.toBeInTheDocument();
+    expect(screen.getByText(encryptedValue)).toBeInTheDocument();
+
+    registry.resolve.mockReturnValue('abc');
+    act(() => {
+      registry.epoch++;
+      window.dispatchEvent(new Event('grafana.tempo.protected-attribute-display-change'));
+    });
+    rerender(
+      <AccordionCategorizedKeyValues
+        data={data}
+        sectionType="span"
+        datasourceType="tempo"
+        isOpen={true}
+        label="Span attributes"
+      />
+    );
+    expect(screen.getByRole('cell', { name: 'abc' })).toBeInTheDocument();
+    expect(screen.getByTestId('attribute-category-other')).toBeInTheDocument();
+
+    rerender(
+      <AccordionCategorizedKeyValues
+        data={data}
+        sectionType="resource"
+        datasourceType="tempo"
+        isOpen={true}
+        label="Resource attributes"
+      />
+    );
+    expect(screen.queryByText('abc')).not.toBeInTheDocument();
+    expect(screen.getByText(encryptedValue)).toBeInTheDocument();
+
+    rerender(
+      <AccordionCategorizedKeyValues
+        data={data}
+        sectionType="resource"
+        datasourceType="tempo"
+        isOpen={false}
+        label="Resource attributes"
+      />
+    );
+    expect(screen.queryByText('abc')).not.toBeInTheDocument();
+    expect(screen.getByText(encryptedValue)).toBeInTheDocument();
+
+    rerender(
+      <AccordionCategorizedKeyValues
+        data={data}
+        sectionType="span"
+        datasourceType="jaeger"
+        isOpen={false}
+        label="Span attributes"
+      />
+    );
+    expect(screen.queryByText('abc')).not.toBeInTheDocument();
+    expect(screen.getByText(encryptedValue)).toBeInTheDocument();
+    expect(data[0].value).toBe(encryptedValue);
   });
 });
