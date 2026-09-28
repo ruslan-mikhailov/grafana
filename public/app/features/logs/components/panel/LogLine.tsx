@@ -21,7 +21,8 @@ import { Button, Icon, Tooltip } from '@grafana/ui';
 import { LogLabels } from '../LogLabels';
 import { LogMessageAnsi } from '../LogMessageAnsi';
 import { LOG_LINE_BODY_FIELD_NAME, OTEL_LOG_LINE_ATTRIBUTES_FIELD_NAME } from '../fieldSelector/logFields';
-import { containsProtectedLogValue, logFieldCategory, resolveProtectedLogField, resolveProtectedLogLine, useProtectedLogDisplayEpoch } from '../protectedLogDisplay';
+import { containsProtectedLogValue, logFieldCategory } from '../protectedLogDisplay';
+import { ProtectedLogField, ProtectedLogText } from '../ProtectedLogText';
 
 import { HighlightedLogRenderer } from './HighlightedLogRenderer';
 import { useLogDetailsContext } from './LogDetailsContext';
@@ -159,7 +160,7 @@ const LogLineComponent = memo(
     }, [handleLogLineResize, detailsMode]);
 
     useLayoutEffect(() => {
-      if (!logLineRef.current) {
+      if (!onOverflow || !logLineRef.current) {
         return;
       }
       let frameId: number;
@@ -177,7 +178,7 @@ const LogLineComponent = memo(
           cancelAnimationFrame(frameId);
         }
       };
-    }, [handleLogLineResize]);
+    }, [handleLogLineResize, onOverflow]);
 
     // Sync collapsed from log when log identity or wrapLogMessage changes.
     // Critical for react-window: when a row is recycled for a different log, we must reset state from the new log.
@@ -211,7 +212,7 @@ const LogLineComponent = memo(
     const detailsShown = detailsDisplayed(log);
 
     return (
-      <div ref={onOverflow ? logLineRef : undefined} data-log-index={index}>
+      <div ref={logLineRef} data-log-index={index}>
         {/* A button element could be used but in Safari it prevents text selection. Fallback available for a11y in LogLineMenu  */}
         {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
         <div
@@ -220,7 +221,15 @@ const LogLineComponent = memo(
           onFocus={handleMouseOver}
           onClick={handleClick}
         >
-          <LogLineMenu styles={styles} log={log} active={isLogDetailsFocused} />
+          <LogLineMenu
+            styles={styles}
+            log={log}
+            active={isLogDetailsFocused}
+            getVisibleBody={() => {
+              const body = logLineRef.current?.querySelector('.log-line-body')?.textContent;
+              return body?.endsWith(' ') ? body.slice(0, -1) : body;
+            }}
+          />
           {dedupStrategy !== LogsDedupStrategy.none && (
             <div className={`${styles.duplicates}`}>
               {log.duplicates && log.duplicates > 0 ? `${log.duplicates + 1}x` : null}
@@ -347,7 +356,6 @@ const Log = memo(
     timestampResolution,
     wrapLogMessage,
   }: LogProps) => {
-    useProtectedLogDisplayEpoch();
     const handleLabelsToggle = useCallback(
       (expanded: boolean) => {
         log.uniqueLabelsExpanded = expanded;
@@ -430,11 +438,8 @@ const DisplayedFields = ({
       }
 
       const rawValue = log.getDisplayedFieldValue(field);
-      const fieldValue = field === OTEL_LOG_LINE_ATTRIBUTES_FIELD_NAME
-        ? resolveProtectedLogLine(rawValue)
-        : containsProtectedLogValue(rawValue)
-          ? resolveProtectedLogField(logFieldCategory(log, field, field in log.labels), field, rawValue)
-          : rawValue;
+      const protectedValue = containsProtectedLogValue(rawValue);
+      const fieldValue = rawValue;
 
       // With wrapped logs, or without unwrapped columns, we skip empty values so they don't appear as an empty space
       if ((wrapLogMessage || !unwrappedColumns) && !fieldValue) {
@@ -443,16 +448,17 @@ const DisplayedFields = ({
 
       return (
         <span className="field" title={getNormalizedFieldName(field)} key={field}>
-          {searchWords ? (
+          {protectedValue ? (
+            field === OTEL_LOG_LINE_ATTRIBUTES_FIELD_NAME ? <ProtectedLogText value={rawValue} /> :
+              <ProtectedLogField category={logFieldCategory(log, field, field in log.labels)} fieldName={field} value={rawValue} />
+          ) : searchWords ? (
             <Highlighter
               textToHighlight={fieldValue}
               searchWords={searchWords}
               findChunks={findHighlightChunksInText}
               highlightClassName={styles.matchHighLight}
             />
-          ) : (
-            fieldValue
-          )}{' '}
+          ) : fieldValue}{' '}
         </span>
       );
     })
@@ -461,9 +467,8 @@ const DisplayedFields = ({
 
 const LogLineBody = ({ log, styles }: { log: LogListModel; styles: LogLineStyles }) => {
   const { isCustomGrammar, syntaxHighlighting } = useLogListContext();
-  useProtectedLogDisplayEpoch();
   const protectedBody = containsProtectedLogValue(log.body);
-  const body = protectedBody ? resolveProtectedLogLine(log.body) : log.body;
+  const body = log.body;
   const { matchingUids, search } = useLogListSearchContext();
 
   const highlight = useMemo(() => {
@@ -477,12 +482,16 @@ const LogLineBody = ({ log, styles }: { log: LogListModel; styles: LogLineStyles
     return { searchWords, highlightClassName: styles.matchHighLight };
   }, [log.searchWords, log.uid, matchingUids, search, styles.matchHighLight, syntaxHighlighting]);
 
-  if (log.hasAnsi) {
+  if (log.hasAnsi && !protectedBody) {
     return (
       <span className="field no-highlighting log-line-body">
         <LogMessageAnsi value={body} highlight={highlight} />{' '}
       </span>
     );
+  }
+
+  if (protectedBody) {
+    return <span className="field no-highlighting log-line-body"><ProtectedLogText value={body} /> </span>;
   }
 
   if (!syntaxHighlighting) {
@@ -498,9 +507,6 @@ const LogLineBody = ({ log, styles }: { log: LogListModel; styles: LogLineStyles
     );
   }
 
-  if (protectedBody) {
-    return <span className="field no-highlighting log-line-body">{body} </span>;
-  }
   const className = isCustomGrammar
     ? 'field prism-syntax-highlight log-line-body'
     : 'field log-syntax-highlight log-line-body';

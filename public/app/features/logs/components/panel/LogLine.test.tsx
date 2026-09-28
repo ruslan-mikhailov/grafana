@@ -114,12 +114,12 @@ describe.each(fontSizes)('LogLine', (fontSize: LogListFontSize) => {
       { entry, raw: entry, labels: { place: 'luna', namespace: envelope } },
       { escape: false, order: LogsSortOrder.Descending, timeZone: 'browser', virtualization, wrapLogMessage: true }
     );
-    render(
+    const { container } = render(
       <LogListContextProvider {...contextProps} showUniqueLabels>
         <LogLine {...defaultProps} log={log} logs={[log]} />
       </LogListContextProvider>
     );
-    expect(screen.getByText(/email=\"\\[encrypted: key unavailable\\]\"/)).toHaveTextContent('outcome=accepted');
+    expect(container.querySelector('.log-line-body')).toHaveTextContent('email=\"Locked\" outcome=accepted');
     expect(screen.queryByText(new RegExp(envelope))).not.toBeInTheDocument();
     expect(log.entry).toBe(entry);
     expect(log.labels.namespace).toBe(envelope);

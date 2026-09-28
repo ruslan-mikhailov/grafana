@@ -338,6 +338,7 @@ export { RelativeTimeRangePicker } from './components/DateTimePickers/RelativeTi
 export { Card, type Props as CardProps, getCardStyles } from './components/Card/Card';
 export { CardContainer, type CardContainerProps } from './components/Card/CardContainer';
 export { FormattedValueDisplay } from './components/FormattedValueDisplay/FormattedValueDisplay';
+export { ProtectedValue, type ProtectedValueProps } from './components/ProtectedValue/ProtectedValue';
 export { ButtonSelect } from './components/Dropdown/ButtonSelect';
 export { Dropdown } from './components/Dropdown/Dropdown';
 export {

@@ -74,7 +74,8 @@ export const LogLineDetailsHeader = ({
   }, [focusLogLine, log, reportInteractionWrapper]);
 
   const copyLogLine = useCallback(() => {
-    copyText(resolveProtectedLogLine(log.entry), containerRef);
+    const visible = containerRef.current?.parentElement?.querySelector('[data-protected-log-body]')?.textContent;
+    copyText(visible ?? resolveProtectedLogLine(log.entry), containerRef);
     reportInteractionWrapper('logs_log_line_details_header_copy_clicked');
   }, [log.entry, reportInteractionWrapper]);
 

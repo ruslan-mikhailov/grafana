@@ -1,6 +1,8 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 
 import { FieldType, sortDataFrame, toDataFrame } from '@grafana/data';
+import { ProtectedLogCell, ProtectedLogField, ProtectedLogText } from './ProtectedLogText';
+
 
 import {
   inferLogFieldCategory,
@@ -169,4 +171,121 @@ it('uses each row authentication category after projection and sorting, not the 
     .toBe('metadata-address');
   expect(resolveField).toHaveBeenCalledWith('line', 'email', token);
   expect(resolveField).toHaveBeenCalledWith('metadata', 'email', email);
+});
+it('keeps public logfmt text intact while independently toggling available and missing protected values', () => {
+  const requestKey = jest.fn(() => true);
+  const resolveField = jest.fn((category: string, field: string, value: string) =>
+    category === 'line' && field === 'email' && value === email ? 'alice@example.invalid' :
+      '[encrypted: key unavailable]'
+  );
+  Reflect.set(globalThis, symbol, {
+    epoch: () => 1,
+    subscribe: () => () => {},
+    resolveField,
+    resolveLine: jest.fn(() => { throw new Error('whole-line resolver must not guess field context'); }),
+    requestKey,
+  });
+  const { container } = render(<ProtectedLogText value={rawLine} />);
+  expect(container).toHaveTextContent('event=login email="alice@example.invalid" api_token="Locked" outcome=accepted');
+  expect(container).not.toHaveTextContent(email);
+  fireEvent.click(screen.getByRole('button', { name: 'Show ciphertext for email' }));
+  expect(container).toHaveTextContent(`email="${email}" api_token="Locked"`);
+  expect(container).not.toHaveTextContent('alice@example.invalid');
+  fireEvent.click(screen.getByRole('button', { name: 'Show decrypted value for email' }));
+  expect(container).toHaveTextContent('email="alice@example.invalid"');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Inspect locked value for api_token' }));
+  const inspector = screen.getByRole('dialog');
+  expect(within(inspector).getByText('b'.repeat(32))).toBeVisible();
+  fireEvent.click(within(inspector).getByRole('button', { name: 'Load matching key' }));
+  expect(requestKey).toHaveBeenCalledTimes(1);
+  expect(requestKey).toHaveBeenCalledWith('b'.repeat(32));
+});
+
+it('masks ambiguous or malformed markers without invoking field decryption', () => {
+  const resolveField = jest.fn(() => 'secret');
+  Reflect.set(globalThis, symbol, {
+    epoch: () => 0, subscribe: () => () => {}, resolveField,
+    resolveLine: jest.fn(() => 'secret'),
+  });
+  const { container } = render(<ProtectedLogText value={`prefix ${email} note=lenc:broken email="prefix${token}" message="hello email=${email}" ending=public`} />);
+  expect(container).not.toHaveTextContent(email);
+  expect(container).not.toHaveTextContent(token);
+  expect(container).toHaveTextContent('prefix Invalid data note=Invalid data email="prefixInvalid data" message="hello email=Invalid data" ending=public');
+  expect(resolveField).not.toHaveBeenCalled();
+});
+
+it('distinguishes failed authentication from a missing key in field displays', () => {
+  Reflect.set(globalThis, symbol, {
+    epoch: () => 1, subscribe: () => () => {},
+    resolveField: () => '[encrypted: invalid data]',
+  });
+  const { container } = render(<>
+    <ProtectedLogField category="label" fieldName="email" value={email} />
+    <ProtectedLogField category="metadata" fieldName="token" value="lenc:v1:broken" />
+  </>);
+  expect(container).toHaveTextContent('Invalid data');
+  expect(container).not.toHaveTextContent(email);
+  expect(screen.queryByRole('button', { name: /Inspect locked value/ })).not.toBeInTheDocument();
+});
+
+it('resets a revealed fragment when its envelope changes without a key epoch change', () => {
+  Reflect.set(globalThis, symbol, {
+    epoch: () => 1, subscribe: () => () => {},
+    resolveField: (_category: string, _field: string, value: string) =>
+      value === email ? 'alice@example.invalid' : 'new@example.invalid',
+  });
+  const { container, rerender } = render(<ProtectedLogField category="line" fieldName="email" value={email} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Show ciphertext for email' }));
+  expect(container).toHaveTextContent(email);
+  rerender(<ProtectedLogField category="line" fieldName="email" value={token} />);
+  expect(container).toHaveTextContent('new@example.invalid');
+  expect(container).not.toHaveTextContent(token);
+});
+
+it('updates live protected fragments on key epochs and forget without modifying source rows', () => {
+  const listeners = new Set<() => void>();
+  let loaded = false;
+  let epoch = 0;
+  const frame = toDataFrame({ fields: [{ name: 'body', type: FieldType.string, values: [rawLine] }] });
+  Reflect.set(globalThis, symbol, {
+    epoch: () => epoch,
+    subscribe: (notify: () => void) => { listeners.add(notify); return () => listeners.delete(notify); },
+    resolveField: (_category: string, field: string) => loaded && field === 'email' ? 'alice@example.invalid' : '[encrypted: key unavailable]',
+  });
+  const { container } = render(<ProtectedLogText value={frame.fields[0].values[0]} />);
+  expect(container).toHaveTextContent('email="Locked"');
+  act(() => { loaded = true; epoch++; listeners.forEach((notify) => notify()); });
+  fireEvent.click(screen.getByRole('button', { name: 'Show ciphertext for email' }));
+  expect(container).toHaveTextContent(email);
+  act(() => { epoch++; listeners.forEach((notify) => notify()); });
+  expect(container).toHaveTextContent('email="alice@example.invalid"');
+  act(() => { loaded = false; epoch++; listeners.forEach((notify) => notify()); });
+  expect(container).toHaveTextContent('email="Locked"');
+  expect(frame.fields[0].values[0]).toBe(rawLine);
+});
+
+it('binds table cells and labels to their own row provenance without replacing frame values', () => {
+  const frame = toDataFrame({ fields: [
+    { name: 'email', type: FieldType.string, values: [email] },
+    { name: 'labels', type: FieldType.other, values: [{ namespace: token, region: 'public' }] },
+    { name: 'labelTypes', type: FieldType.other, values: [{ email: 'S', namespace: 'I' }] },
+  ] });
+  const resolveField = jest.fn((category: string, name: string) =>
+    category === 'metadata' && name === 'email' ? 'alice@example.invalid' : '[encrypted: key unavailable]'
+  );
+  Reflect.set(globalThis, symbol, { epoch: () => 1, subscribe: () => () => {}, resolveField });
+  const { container } = render(<>
+    {ProtectedLogCell({ field: 'email', value: email, frame, rowIndex: 0, isBody: false })}
+    {ProtectedLogCell({ field: 'labels', value: frame.fields[1].values[0], frame, rowIndex: 0, isBody: false })}
+    <ProtectedLogField category="line" fieldName="email" value={email} />
+  </>);
+  expect(container).toHaveTextContent('alice@example.invalid');
+  expect(container).toHaveTextContent('"namespace":"Locked"');
+  expect(container).toHaveTextContent('"region":"public"');
+  expect(resolveField).toHaveBeenCalledWith('metadata', 'email', email);
+  expect(resolveField).toHaveBeenCalledWith('label', 'namespace', token);
+  expect(resolveField).toHaveBeenCalledWith('line', 'email', email);
+  expect(frame.fields[0].values[0]).toBe(email);
+  expect(frame.fields[1].values[0]).toEqual({ namespace: token, region: 'public' });
 });

@@ -6,7 +6,8 @@ import { t } from '@grafana/i18n';
 import { Button, Icon, Tooltip, useStyles2 } from '@grafana/ui';
 
 import { getNormalizedFieldName } from './panel/processing';
-import { containsProtectedLogValue, logFieldCategory, resolveProtectedLogField, useProtectedLogDisplayEpoch } from './protectedLogDisplay';
+import { containsProtectedLogValue, logFieldCategory } from './protectedLogDisplay';
+import { ProtectedLogField } from './ProtectedLogText';
 
 // Levels are already encoded in color, filename is a Loki-ism
 const HIDDEN_LABELS = ['detected_level', 'level', 'lvl', 'filename'];
@@ -32,14 +33,17 @@ export const LogLabels = memo(
     displayAll: initialDisplayAll = false,
   }: Props) => {
     const [displayAll, setDisplayAll] = useState<boolean | undefined>(displayMax ? initialDisplayAll : undefined);
-    const epoch = useProtectedLogDisplayEpoch();
     const styles = useStyles2(getStyles);
     const allLabels = useMemo(
       () =>
         Object.keys(labels)
           .filter((label) => !label.startsWith('_') && !HIDDEN_LABELS.includes(label) && labels[label])
-          .map((label) => `${label}=${containsProtectedLogValue(labels[label]) ? resolveProtectedLogField(log ? logFieldCategory(log, label, true) : 'label', label, labels[label]) : labels[label]}`),
-      [labels, log, epoch]
+          .map((label) => ({
+            name: label,
+            raw: labels[label],
+            category: log ? logFieldCategory(log, label, true) : 'label' as const,
+          })),
+      [labels, log]
     );
     const displayLabels = useMemo(
       () => allLabels.slice(0, !displayAll && displayMax ? displayMax : Infinity),
@@ -56,14 +60,17 @@ export const LogLabels = memo(
 
     return (
       <span className={styles.logsLabels}>
-        {displayLabels.map((labelValue) => {
+        {displayLabels.map(({ name, raw, category }) => {
+          const tooltip = containsProtectedLogValue(raw) ? name : `${name}=${raw}`;
+          const chip = <>{name}={containsProtectedLogValue(raw) ?
+            <ProtectedLogField category={category} fieldName={name} value={raw} /> : raw}</>;
           return addTooltip ? (
-            <Tooltip content={labelValue} key={labelValue} placement="top">
-              <LogLabel styles={styles}>{labelValue}</LogLabel>
+            <Tooltip content={tooltip} key={name} placement="top">
+              <LogLabel styles={styles}>{chip}</LogLabel>
             </Tooltip>
           ) : (
-            <LogLabel styles={styles} tooltip={labelValue} key={labelValue}>
-              {labelValue}
+            <LogLabel styles={styles} tooltip={tooltip} key={name}>
+              {chip}
             </LogLabel>
           );
         })}

@@ -12,6 +12,7 @@ interface DisplayBridge {
   resolveLine(line: string): string;
   subscribe(listener: () => void): () => void;
   epoch(): number;
+  requestKey?(kid: string): boolean;
 }
 export function logFieldCategory(log: LogRowModel, field: string, isLabel: boolean): Category {
   return frameFieldCategory(log.dataFrame, log.rowIndex, field, isLabel);
@@ -99,6 +100,10 @@ export function resolveProtectedLogCell(field: string, value: unknown, frame: Da
   }
   return undefined;
 }
+export function protectedLogCellCategory(frame: DataFrame, rowIndex: number, field: string, fallback?: Category): Category {
+  return cellCategory(frame, rowIndex, field, fallback);
+}
+
 
 function bridge(): DisplayBridge | undefined {
   return Reflect.get(globalThis, symbol) as DisplayBridge | undefined;
@@ -118,6 +123,72 @@ function validEnvelope(value: string): boolean {
     (remainder !== 3 || /[AEIMQUYcgkosw048]/.test(last))
   );
 }
+export function protectedLogKeyId(value: string): string | undefined {
+  return validEnvelope(value) ? value.slice('lenc:v1:'.length, 'lenc:v1:'.length + 32) : undefined;
+}
+
+export function requestProtectedLogKey(value: string): boolean {
+  const kid = protectedLogKeyId(value);
+  return kid ? bridge()?.requestKey?.(kid) ?? false : false;
+}
+
+export type ProtectedLogSegment =
+  | { text: string }
+  | { invalid: true }
+  | { value: string; field: string; category: Category };
+
+// Bind only complete logfmt values to their field name. Everything else containing
+// the reserved marker is invalid, never guessed from adjacent text.
+export function protectedLogLineSegments(line: string): ProtectedLogSegment[] {
+  if (!line.includes('lenc:')) {
+    return [{ text: line }];
+  }
+  if (line.startsWith('lenc:') && !/\s/.test(line)) {
+    return [{ value: line, field: '', category: 'line' }];
+  }
+  const segments: ProtectedLogSegment[] = [];
+  const marker = /lenc:[^\s"'`]*/g;
+  let end = 0;
+  let scanned = 0;
+  let tokenStart = 0;
+  let quote: string | undefined;
+  let escaped = false;
+  for (const match of line.matchAll(marker)) {
+    const start = match.index ?? 0;
+    for (let i = scanned; i < start; i++) {
+      const char = line[i];
+      if (escaped) {
+        escaped = false;
+      } else if (quote && char === '\\') {
+        escaped = true;
+      } else if (quote && char === quote) {
+        quote = undefined;
+      } else if (!quote && (char === '"' || char === "'")) {
+        quote = char;
+      } else if (!quote && /\s/.test(char)) {
+        tokenStart = i + 1;
+      }
+    }
+    const prefix = line.slice(end, start);
+    const binding = /^([A-Za-z_][\w.-]*)=(["']?)$/.exec(line.slice(tokenStart, start));
+    const quoted = binding?.[2];
+    const after = start + match[0].length;
+    const complete = binding && (quoted
+      ? quote === quoted && line[after] === quoted
+      : !quote && (after === line.length || /\s/.test(line[after])));
+    if (prefix) {
+      segments.push({ text: prefix });
+    }
+    segments.push(complete ? { value: match[0], field: binding[1], category: 'line' } : { invalid: true });
+    end = after;
+    scanned = after;
+  }
+  if (end < line.length) {
+    segments.push({ text: line.slice(end) });
+  }
+  return segments;
+}
+
 
 export function isProtectedLogValue(value: unknown): value is string {
   return typeof value === 'string' && value.startsWith('lenc:');
@@ -136,31 +207,19 @@ export function resolveProtectedLogField(category: Category, field: string, valu
   }
   try {
     const resolved = resolver.resolveField(category, field, value);
-    return isProtectedLogValue(resolved) ? invalid : resolved;
+    return containsProtectedLogValue(resolved) ? invalid : resolved;
   } catch {
     return invalid;
   }
 }
 
-// Only a complete logfmt value (or an entire encrypted line) has a known field context.
-// Unbound lenc markers must be masked, not guessed at or displayed as ciphertext.
+// Copy/presentation uses the same field-bound segmentation as visible React values.
+// Never hand an ambiguous marker to a whole-line bridge that may guess its field.
 export function resolveProtectedLogLine(line: string): string {
-  if (!line.includes('lenc:')) {
-    return line;
-  }
-  if (line.startsWith('lenc:') && !/\s/.test(line)) {
-    return resolveProtectedLogField('line', '', line);
-  }
-  const resolver = bridge();
-  if (resolver) {
-    try {
-      const resolved = resolver.resolveLine(line);
-      return resolved.replace(/lenc:[^\s"']+/g, (value) => (validEnvelope(value) ? unavailable : invalid));
-    } catch {
-      // An invalid bridge result must not expose the original ciphertext.
-    }
-  }
-  return line.replace(/lenc:[^\s"']+/g, (value) => (validEnvelope(value) ? unavailable : invalid));
+  return protectedLogLineSegments(line).map((segment) =>
+    'text' in segment ? segment.text : 'invalid' in segment ? invalid :
+      resolveProtectedLogField(segment.category, segment.field, segment.value)
+  ).join('');
 }
 
 export function containsProtectedLogValue(value: unknown): boolean {

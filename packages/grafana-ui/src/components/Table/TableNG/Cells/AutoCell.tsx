@@ -1,15 +1,18 @@
 import { css } from '@emotion/css';
 import { clsx } from 'clsx';
 import memoize from 'micro-memoize';
-import { useState, useSyncExternalStore } from 'react';
+import { useSyncExternalStore } from 'react';
 
 import {
   formattedValueToString,
   getProtectedAttributeDisplayEpoch,
   getProtectedAttributeDisplayValue,
+  getProtectedAttributeKeyId,
+  requestProtectedAttributeKey,
   subscribeProtectedAttributeDisplay,
 } from '@grafana/data';
 
+import { ProtectedValue } from '../../../ProtectedValue/ProtectedValue';
 import { MaybeWrapWithLink } from '../components/MaybeWrapWithLink';
 import { TABLE } from '../constants';
 import { getActiveCellSelector, isTableCellStylesKeyEqual } from '../styles';
@@ -21,56 +24,26 @@ export function AutoCell({ value, field, rowIdx }: AutoCellProps) {
     getProtectedAttributeDisplayEpoch,
     getProtectedAttributeDisplayEpoch
   );
-  const [revealed, setRevealed] = useState<{ field: string; raw: string; epoch: number } | null>(null);
   const displayValue = getProtectedAttributeDisplayValue(field.name, value);
-  if (displayValue === '[encrypted: key unavailable]' && typeof value === 'string') {
-    const isRevealed = revealed?.field === field.name && revealed.raw === value && revealed.epoch === epoch;
+  if (displayValue !== undefined && typeof value === 'string') {
+    const kid = getProtectedAttributeKeyId(field.name, value);
     return (
-      <>
-        {isRevealed && <span className={ciphertextText}>{value}</span>}
-        {isRevealed && ' '}
-        <button
-          type="button"
-          className={ciphertextButton}
-          aria-label={`${isRevealed ? 'Hide' : 'Show'} encrypted value for ${field.name}`}
-          aria-pressed={isRevealed}
-          onClick={() => setRevealed(isRevealed ? null : { field: field.name, raw: value, epoch })}
-        >
-          {isRevealed ? 'Hide ciphertext' : `${displayValue} · Show ciphertext`}
-        </button>
-      </>
+      <ProtectedValue
+        value={value}
+        displayValue={displayValue}
+        fieldName={field.name}
+        epoch={epoch}
+        onLoadKey={kid ? () => requestProtectedAttributeKey(kid) : undefined}
+      />
     );
   }
-  const formattedValue = displayValue ?? formattedValueToString(field.display!(value));
+  const formattedValue = formattedValueToString(field.display!(value));
   return (
     <MaybeWrapWithLink field={field} rowIdx={rowIdx}>
       {formattedValue}
     </MaybeWrapWithLink>
   );
 }
-
-const ciphertextButton = css({
-  background: 'none',
-  border: 0,
-  color: 'inherit',
-  cursor: 'pointer',
-  font: 'inherit',
-  padding: 0,
-  textAlign: 'inherit',
-  textDecoration: 'underline',
-  textUnderlineOffset: '2px',
-  '&:focus-visible': {
-    outline: '2px solid currentColor',
-    outlineOffset: '2px',
-  },
-  whiteSpace: 'inherit',
-  overflowWrap: 'anywhere',
-});
-
-const ciphertextText = css({
-  overflowWrap: 'anywhere',
-  userSelect: 'text',
-});
 
 /**
  * `pre-line` collapses runs of whitespace, which suits prose but flattens the indentation a JSON

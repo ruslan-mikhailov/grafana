@@ -4,6 +4,10 @@ import userEvent from '@testing-library/user-event';
 import { LogLabels, LogLabelsList } from './LogLabels';
 import { LOG_LINE_BODY_FIELD_NAME } from './fieldSelector/logFields';
 import { getNormalizedFieldName } from './panel/processing';
+const protectedDisplay = Symbol.for('grafana.loki.protectedLogDisplay.v1');
+
+afterEach(() => Reflect.deleteProperty(globalThis, protectedDisplay));
+
 
 describe('<LogLabels />', () => {
   it('renders notice when no labels are found', () => {
@@ -90,6 +94,26 @@ describe('<LogLabels />', () => {
       expect(screen.queryByText('baz=42')).not.toBeInTheDocument();
     });
   });
+});
+
+it('keeps protected label chips interactive without changing source labels or exposing plaintext in tooltips', async () => {
+  const value = `lenc:v1:${'a'.repeat(32)}:AAAAAAAAAAAAAAAAAAAAAA`;
+  const labels = { namespace: value, region: 'public' };
+  const resolveField = jest.fn(() => 'secret-namespace');
+  Reflect.set(globalThis, protectedDisplay, {
+    epoch: () => 1,
+    subscribe: () => () => {},
+    resolveField,
+  });
+  const { container } = render(<LogLabels labels={labels} />);
+  expect(container).toHaveTextContent('namespace=secret-namespace');
+  expect(container).toHaveTextContent('region=public');
+  expect(container).not.toHaveTextContent(value);
+  await userEvent.click(screen.getByRole('button', { name: 'Show ciphertext for namespace' }));
+  expect(container).toHaveTextContent(`namespace=${value}`);
+  expect(container).not.toHaveTextContent('secret-namespace');
+  expect(resolveField).toHaveBeenCalledWith('label', 'namespace', value);
+  expect(labels.namespace).toBe(value);
 });
 
 describe('<LogLabelsList />', () => {

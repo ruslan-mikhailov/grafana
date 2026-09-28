@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 
 import { type LogRowModel } from '@grafana/data';
 
@@ -116,15 +116,33 @@ describe('LiveLogs', () => {
     expect(logList[0]).toHaveAttribute('style', 'color: rgb(204, 0, 0);');
     expect(logList[1]).toHaveAttribute('style', 'color: rgb(204, 102, 0);');
   });
-  it('masks live encrypted logfmt fields while retaining the streamed row bytes', () => {
+  it('updates live encrypted fragments on key changes without modifying streamed row bytes', () => {
     const envelope = `lenc:v1:${'a'.repeat(32)}:AAAAAAAAAAAAAAAAAAAAAA`;
     const entry = `event=login email=\"${envelope}\" outcome=accepted`;
     const rows = makeLogs(1, { entry, raw: entry });
-    setup(rows);
-
-    expect(screen.getByRole('cell', { name: 'event=login email=\"[encrypted: key unavailable]\" outcome=accepted' }))
-      .toBeVisible();
-    expect(rows[0].entry).toBe(entry);
-    expect(rows[0].raw).toBe(entry);
+    const symbol = Symbol.for('grafana.loki.protectedLogDisplay.v1');
+    const listeners = new Set<() => void>();
+    let epoch = 0;
+    let available = false;
+    Reflect.set(globalThis, symbol, {
+      epoch: () => epoch,
+      subscribe: (notify: () => void) => { listeners.add(notify); return () => listeners.delete(notify); },
+      resolveField: () => available ? 'alice@example.invalid' : '[encrypted: key unavailable]',
+    });
+    try {
+      const { container } = setup(rows);
+      expect(container).toHaveTextContent('event=login email=\"Locked\" outcome=accepted');
+      expect(container).not.toHaveTextContent(envelope);
+      act(() => { available = true; epoch++; listeners.forEach((notify) => notify()); });
+      expect(container).toHaveTextContent('email=\"alice@example.invalid\"');
+      fireEvent.click(screen.getByRole('button', { name: 'Show ciphertext for email' }));
+      expect(container).toHaveTextContent(`email=\"${envelope}\"`);
+      act(() => { epoch++; listeners.forEach((notify) => notify()); });
+      expect(container).toHaveTextContent('email=\"alice@example.invalid\"');
+      expect(rows[0].entry).toBe(entry);
+      expect(rows[0].raw).toBe(entry);
+    } finally {
+      Reflect.deleteProperty(globalThis, symbol);
+    }
   });
 });

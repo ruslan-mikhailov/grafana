@@ -4,7 +4,8 @@ import { type Field, formattedValueToString, getDisplayProcessor, type GrafanaTh
 import { type CustomCellRendererProps, useStyles2, useTheme2 } from '@grafana/ui';
 import { MaybeWrapWithLink } from '@grafana/ui/internal';
 import { type LogsFrame } from 'app/features/logs/logsFrame';
-import { type Category, resolveProtectedLogCell, useProtectedLogDisplayEpoch } from 'app/features/logs/components/protectedLogDisplay';
+import { ProtectedLogCell } from 'app/features/logs/components/ProtectedLogText';
+import { type Category } from 'app/features/logs/components/protectedLogDisplay';
 
 import { ROW_ACTION_BUTTON_WIDTH } from '../constants';
 import type { Options as LogsTableOptions } from '../panelcfg.gen';
@@ -56,8 +57,7 @@ interface AutoCellProps {
 // Copy pasta from packages/grafana-ui/src/components/Table/TableNG/Cells/AutoCell.tsx
 function AutoCell({ value, field, frame, rowIdx, isBody, category }: AutoCellProps) {
   const theme = useTheme2();
-  useProtectedLogDisplayEpoch();
-  const visible = resolveProtectedLogCell(field.name, value, frame, rowIdx, isBody, category);
+  const visible = ProtectedLogCell({ field: field.name, value, frame, rowIndex: rowIdx, isBody, category });
   if (visible !== undefined) {
     return <span>{visible}</span>;
   }

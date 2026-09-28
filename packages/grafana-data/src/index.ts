@@ -180,6 +180,8 @@ export {
 export { getDisplayProcessor, getRawDisplayProcessor } from './field/displayProcessor';
 export {
   getProtectedAttributeDisplayValue,
+  getProtectedAttributeKeyId,
+  requestProtectedAttributeKey,
   getProtectedAttributeDisplayEpoch,
   subscribeProtectedAttributeDisplay,
 } from './field/protectedAttributeDisplay';

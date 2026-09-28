@@ -1,7 +1,7 @@
 import { css } from '@emotion/css';
 import { isEqual } from 'lodash';
 import { parse, stringify } from 'lossless-json';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   CoreApp,
@@ -21,8 +21,8 @@ import { calculateLogsLabelStats, calculateStats } from '../../utils';
 import { LogLabelStats } from '../LogLabelStats';
 import { OTEL_LOG_LINE_ATTRIBUTES_FIELD_NAME } from '../fieldSelector/logFields';
 import { type FieldDef } from '../logParser';
-import { containsProtectedLogValue, logFieldCategory, resolveProtectedLogField, resolveProtectedLogLine, useProtectedLogDisplayEpoch } from '../protectedLogDisplay';
-
+import { containsProtectedLogValue, logFieldCategory, resolveProtectedLogField } from '../protectedLogDisplay';
+import { ProtectedLogField, ProtectedLogText } from '../ProtectedLogText';
 import { AsyncIconButton } from './AsyncIconButton';
 import { useLogDetailsContext } from './LogDetailsContext';
 import { type LogListFontSize } from './LogList';
@@ -155,7 +155,6 @@ const LogLineDetailsField = ({
   const [showFieldsStats, setShowFieldStats] = useState(false);
   const [fieldCount, setFieldCount] = useState(0);
   const [fieldStats, setFieldStats] = useState<LogLabelStatsModel[] | null>(null);
-  useProtectedLogDisplayEpoch();
   const { fontSize } = useLogListContext();
   const {
     app,
@@ -323,13 +322,6 @@ const LogLineDetailsField = ({
   const singleValue = values.length === 1;
 
   const fieldSupportsFilters = keys[0] !== OTEL_LOG_LINE_ATTRIBUTES_FIELD_NAME && !values.some(containsProtectedLogValue);
-  const visibleValues = values.map((value, index) => {
-    if (!containsProtectedLogValue(value)) {
-      return value;
-    }
-    const key = keys[index] ?? keys[0];
-    return resolveProtectedLogField(logFieldCategory(log, key, Boolean(isLabel)), key, value);
-  });
 
   return (
     <>
@@ -399,9 +391,18 @@ const LogLineDetailsField = ({
         <div className={styles.value}>
           <div className={styles.valueContainer}>
             {singleValue ? (
-              <SingleValue value={visibleValues[0]} prettifyJSON={prettifyJSON} />
+              containsProtectedLogValue(values[0]) ? (
+                <ProtectedDetailValue value={values[0]} fieldName={keys[0]} category={logFieldCategory(log, keys[0], Boolean(isLabel))} />
+              ) : <SingleValue value={values[0]} prettifyJSON={prettifyJSON} />
             ) : (
-              <MultipleValue showCopy={true} values={visibleValues} />
+              <table><tbody>{values.map((value, index) => {
+                const key = keys[index] ?? keys[0];
+                return <tr key={`${key}-${index}`}><td>
+                  {containsProtectedLogValue(value) ?
+                    <ProtectedDetailValue value={value} fieldName={key} category={logFieldCategory(log, key, Boolean(isLabel))} /> :
+                    <SingleValue value={value} />}
+                </td></tr>;
+              })}</tbody></table>
             )}
           </div>
         </div>
@@ -434,7 +435,7 @@ const LogLineDetailsField = ({
                   onClick: () => reportLinkClick(link),
                   ...(link.icon && { icon: link.icon }),
                 }}
-                link={{ ...link, title: resolveProtectedLogLine(link.title) }}
+                link={{ ...link, title: containsProtectedLogValue(link.title) ? 'Protected value' : link.title }}
               />
             </div>
           </div>
@@ -525,12 +526,12 @@ const getFieldStyles = (theme: GrafanaTheme2) => ({
   }),
 });
 
-const ClipboardButtonWrapper = ({ value }: { value: string }) => {
+const ClipboardButtonWrapper = ({ value, getText }: { value: string; getText?: () => string }) => {
   const styles = useStyles2(getClipboardButtonStyles);
   return (
     <div className={styles.button}>
       <ClipboardButton
-        getText={() => value}
+        getText={getText ?? (() => value)}
         aria-label={t('logs.log-line-details.fields.copy-value-to-clipboard', 'Copy value to clipboard')}
         fill="text"
         variant="secondary"
@@ -564,6 +565,19 @@ const getClipboardButtonStyles = (theme: GrafanaTheme2) => ({
     },
   }),
 });
+
+export const ProtectedDetailValue = ({ value, fieldName, category }: { value: string; fieldName: string; category: 'label' | 'metadata' | 'line' }) => {
+  const ref = useRef<HTMLSpanElement>(null);
+  const visible = resolveProtectedLogField(category, fieldName, value);
+  return (
+    <>
+      <span ref={ref}>{category === 'line' && fieldName === OTEL_LOG_LINE_ATTRIBUTES_FIELD_NAME ?
+        <ProtectedLogText value={value} /> :
+        <ProtectedLogField category={category} fieldName={fieldName} value={value} />}</span>
+      <ClipboardButtonWrapper value={visible} getText={() => ref.current?.textContent ?? visible} />
+    </>
+  );
+};
 
 export const MultipleValue = ({ showCopy, values = [] }: { showCopy?: boolean; values: string[] }) => {
   if (values.every((val) => val === '')) {

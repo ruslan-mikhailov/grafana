@@ -37,9 +37,10 @@ interface Props {
   active?: boolean;
   log: LogListModel;
   styles: LogLineStyles;
+  getVisibleBody?: () => string | undefined;
 }
 
-export const LogLineMenu = ({ active, log, styles }: Props) => {
+export const LogLineMenu = ({ active, log, styles, getVisibleBody }: Props) => {
   const {
     getRowContextQuery,
     onOpenContext,
@@ -56,9 +57,9 @@ export const LogLineMenu = ({ active, log, styles }: Props) => {
   const menuRef = useRef(null);
 
   const copyLogLine = useCallback(() => {
-    copyText(resolveProtectedLogLine(log.entry), menuRef);
+    copyText(getVisibleBody?.() ?? resolveProtectedLogLine(log.entry), menuRef);
     reportInteraction('logs_log_line_menu_header_copy_clicked');
-  }, [log.entry]);
+  }, [log.entry, getVisibleBody]);
 
   const copyLogLineAsJson = useCallback(async () => {
     copyText(await getLogAsJSON(log), menuRef);

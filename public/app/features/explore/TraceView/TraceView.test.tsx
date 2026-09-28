@@ -377,9 +377,9 @@ describe('TraceView', () => {
       expect(screen.getByRole('cell', { name: 'http.note' })).toBeInTheDocument();
       expect(resolve).toHaveBeenCalledWith('enc.secret', ciphertext);
       if (displayedValue === '[encrypted: key unavailable]') {
-        expect(screen.getByRole('button', { name: 'Show encrypted value for enc.secret' })).toHaveTextContent(displayedValue);
+        expect(screen.getByRole('button', { name: 'Inspect locked value for enc.secret' })).toHaveTextContent('Locked');
       } else {
-        expect(screen.getByText(displayedValue)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Show ciphertext for enc.secret' })).toHaveTextContent(displayedValue);
       }
 
       await userEvent.click(screen.getByRole('switch', { name: /Span attributes/ }));
@@ -387,9 +387,9 @@ describe('TraceView', () => {
       expect(screen.queryByText('bi.secret')).not.toBeInTheDocument();
       expect(screen.queryByText(blindIndex[0])).not.toBeInTheDocument();
       if (displayedValue === '[encrypted: key unavailable]') {
-        expect(screen.getByRole('button', { name: 'Show encrypted value for enc.secret' })).toHaveTextContent(displayedValue);
+        expect(screen.getByRole('button', { name: 'Inspect locked value for enc.secret' })).toHaveTextContent('Locked');
       } else {
-        expect(screen.getByText(displayedValue)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Show ciphertext for enc.secret' })).toHaveTextContent(displayedValue);
       }
       expect(frame.fields.find((field) => field.name === 'tags')!.values[0]).toContainEqual({
         key: 'bi.secret',

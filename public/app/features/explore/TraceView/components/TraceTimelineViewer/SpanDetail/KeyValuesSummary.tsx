@@ -1,15 +1,16 @@
 import { css } from '@emotion/css';
-
-import { useState, useSyncExternalStore } from 'react';
+import { useSyncExternalStore } from 'react';
 
 import {
   getProtectedAttributeDisplayEpoch,
   getProtectedAttributeDisplayValue,
+  getProtectedAttributeKeyId,
+  requestProtectedAttributeKey,
   subscribeProtectedAttributeDisplay,
   type GrafanaTheme2,
   type TraceKeyValuePair,
 } from '@grafana/data';
-import { useStyles2 } from '@grafana/ui';
+import { ProtectedValue, useStyles2 } from '@grafana/ui';
 
 export type KeyValuesSummaryProps = {
   data?: TraceKeyValuePair[] | null;
@@ -23,7 +24,6 @@ export function KeyValuesSummary({ data = null, datasourceType, isSpanAttribute 
     getProtectedAttributeDisplayEpoch,
     getProtectedAttributeDisplayEpoch
   );
-  const [revealed, setRevealed] = useState<Record<number, { field: string; raw: string; epoch: number }>>({});
   const styles = useStyles2(getStyles);
 
   if (!Array.isArray(data) || !data.length) {
@@ -37,40 +37,23 @@ export function KeyValuesSummary({ data = null, datasourceType, isSpanAttribute 
           datasourceType === 'tempo' && isSpanAttribute
             ? getProtectedAttributeDisplayValue(item.key, item.value)
             : undefined;
-        const canReveal = displayValue === '[encrypted: key unavailable]' && typeof item.value === 'string';
-        const isRevealed =
-          canReveal && revealed[i]?.field === item.key && revealed[i].raw === item.value && revealed[i].epoch === epoch;
         return (
           // `i` is necessary in the key because item.key can repeat
           <li className={styles.summaryItem} key={`${item.key}-${i}`}>
             <span className={styles.summaryLabel}>{item.key}</span>
-            {canReveal ? (
-              <>
-                {isRevealed && <span className={styles.ciphertextText}>{item.value}</span>}
-                {isRevealed && ' '}
-                <button
-                  type="button"
-                  className={styles.ciphertextButton}
-                  aria-label={`${isRevealed ? 'Hide' : 'Show'} encrypted value for ${item.key}`}
-                  aria-pressed={isRevealed}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setRevealed((current) => {
-                      const next = { ...current };
-                      if (isRevealed) {
-                        delete next[i];
-                      } else {
-                        next[i] = { field: item.key, raw: item.value, epoch };
-                      }
-                      return next;
-                    });
-                  }}
-                >
-                  {isRevealed ? 'Hide ciphertext' : `${displayValue} · Show ciphertext`}
-                </button>
-              </>
+            {displayValue !== undefined && typeof item.value === 'string' ? (
+              <ProtectedValue
+                value={item.value}
+                displayValue={displayValue}
+                fieldName={item.key}
+                epoch={epoch}
+                onLoadKey={() => {
+                  const kid = getProtectedAttributeKeyId(item.key, item.value);
+                  return kid ? requestProtectedAttributeKey(kid) : false;
+                }}
+              />
             ) : (
-              String(displayValue ?? item.value)
+              String(item.value)
             )}
           </li>
         );
@@ -100,26 +83,6 @@ const getStyles = (theme: GrafanaTheme2) => {
       label: 'summaryLabel',
       color: theme.colors.text.secondary,
       paddingRight: '0.5rem',
-    }),
-    ciphertextButton: css({
-      background: 'none',
-      border: 0,
-      color: theme.colors.text.link,
-      cursor: 'pointer',
-      font: 'inherit',
-      padding: 0,
-      textAlign: 'inherit',
-      textDecoration: 'underline',
-      textUnderlineOffset: '2px',
-      '&:focus-visible': {
-        outline: '2px solid currentColor',
-        outlineOffset: '2px',
-      },
-      overflowWrap: 'anywhere',
-    }),
-    ciphertextText: css({
-      overflowWrap: 'anywhere',
-      userSelect: 'text',
     }),
   };
 };

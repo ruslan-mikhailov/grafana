@@ -7,9 +7,10 @@ const envelopePattern = /^enc:v1:[0-9a-f]{32}:([A-Za-z0-9_-]{22,})$/;
 interface ProtectedAttributeDisplayRegistry {
   epoch: number;
   resolve(storedField: string, envelope: string): string | undefined;
+  requestKey?(kid: string): boolean;
 }
 
-export function getProtectedAttributeDisplayValue(fieldName: string, raw: unknown): string | undefined {
+export function getProtectedAttributeKeyId(fieldName: string, raw: unknown): string | undefined {
   if (!fieldName.startsWith('enc.') || fieldName.length === 4 || typeof raw !== 'string') {
     return undefined;
   }
@@ -29,8 +30,23 @@ export function getProtectedAttributeDisplayValue(fieldName: string, raw: unknow
   ) {
     return undefined;
   }
+  return raw.slice(7, 39);
+}
+
+export function requestProtectedAttributeKey(kid: string): boolean {
+  if (!/^[0-9a-f]{32}$/.test(kid)) {
+    return false;
+  }
   const registry = Reflect.get(globalThis, registrySymbol) as ProtectedAttributeDisplayRegistry | undefined;
-  return registry?.resolve(fieldName, raw);
+  return registry?.requestKey?.(kid) ?? false;
+}
+
+export function getProtectedAttributeDisplayValue(fieldName: string, raw: unknown): string | undefined {
+  if (getProtectedAttributeKeyId(fieldName, raw) === undefined) {
+    return undefined;
+  }
+  const registry = Reflect.get(globalThis, registrySymbol) as ProtectedAttributeDisplayRegistry | undefined;
+  return registry?.resolve(fieldName, raw as string);
 }
 
 export function getProtectedAttributeDisplayEpoch(): number {

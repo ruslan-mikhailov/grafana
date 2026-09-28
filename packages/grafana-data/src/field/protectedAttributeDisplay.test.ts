@@ -1,5 +1,7 @@
 import {
   getProtectedAttributeDisplayEpoch,
+  getProtectedAttributeKeyId,
+  requestProtectedAttributeKey,
   getProtectedAttributeDisplayValue,
   subscribeProtectedAttributeDisplay,
 } from './protectedAttributeDisplay';
@@ -37,6 +39,21 @@ test('resolves only canonical envelopes on stored protected fields', () => {
   expect(getProtectedAttributeDisplayValue('enc.password', 42)).toBeUndefined();
   expect(resolve).toHaveBeenCalledTimes(1);
   expect(resolve).toHaveBeenCalledWith('enc.password', envelope);
+});
+test('requests one eligible key UI with only the canonical envelope key ID', () => {
+  const requestKey = jest.fn(() => true);
+  Reflect.set(globalThis, registrySymbol, { epoch: 1, resolve: () => undefined, requestKey });
+  const kid = getProtectedAttributeKeyId('enc.password', envelope);
+  expect(kid).toBe('630dcd2966c4336691125448bbb25b4f');
+  expect(requestProtectedAttributeKey(kid!)).toBe(true);
+  expect(requestKey).toHaveBeenCalledTimes(1);
+  expect(requestKey).toHaveBeenCalledWith(kid);
+  expect(getProtectedAttributeKeyId('plain', envelope)).toBeUndefined();
+  expect(getProtectedAttributeKeyId('enc.password', `${envelope}=`)).toBeUndefined();
+  expect(requestProtectedAttributeKey(envelope)).toBe(false);
+  expect(requestKey).toHaveBeenCalledTimes(1);
+  Reflect.set(globalThis, registrySymbol, { epoch: 2, resolve: () => undefined });
+  expect(requestProtectedAttributeKey(kid!)).toBe(false);
 });
 
 test('reports registry epochs and notifies subscribers when the key changes', () => {

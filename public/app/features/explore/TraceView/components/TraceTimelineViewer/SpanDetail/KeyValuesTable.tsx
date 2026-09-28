@@ -29,6 +29,8 @@ import {
 import {
   getProtectedAttributeDisplayEpoch,
   getProtectedAttributeDisplayValue,
+  getProtectedAttributeKeyId,
+  requestProtectedAttributeKey,
   subscribeProtectedAttributeDisplay,
   type GrafanaTheme2,
   type PluginExtensionLink,
@@ -36,7 +38,7 @@ import {
 } from '@grafana/data';
 import { t } from '@grafana/i18n';
 import { config, reportInteraction, useReturnToPrevious } from '@grafana/runtime';
-import { Dropdown, Icon, Menu, useStyles2 } from '@grafana/ui';
+import { Dropdown, Icon, Menu, ProtectedValue, useStyles2 } from '@grafana/ui';
 
 import { getTraceViewLinkAttrs, openTraceViewHref } from '../../../utils/openTraceViewHref';
 import { autoColor } from '../../Theme';
@@ -149,25 +151,6 @@ const getStyles = (theme: GrafanaTheme2) => {
       // `word-break: break-word` also shrinks min-content, which lets the table column narrow enough
       // to wrap long unbroken values. `overflow-wrap: break-word` does not, and restores the scrollbar.
       wordBreak: 'break-word',
-    }),
-    ciphertextButton: css({
-      background: 'none',
-      border: 0,
-      color: theme.colors.text.link,
-      cursor: 'pointer',
-      font: 'inherit',
-      padding: 0,
-      textAlign: 'inherit',
-      textDecoration: 'underline',
-      textUnderlineOffset: '2px',
-      '&:focus-visible': {
-        outline: '2px solid currentColor',
-        outlineOffset: '2px',
-      },
-    }),
-    ciphertextText: css({
-      overflowWrap: 'anywhere',
-      userSelect: 'text',
     }),
   };
 };
@@ -396,7 +379,7 @@ export default function KeyValuesTable(props: KeyValuesTableProps) {
     getProtectedAttributeDisplayEpoch,
     getProtectedAttributeDisplayEpoch
   );
-  const [revealed, setRevealed] = useState<Record<number, { field: string; raw: string; epoch: number }>>({});
+  const [shownValues, setShownValues] = useState<Record<number, { field: string; raw: string; epoch: number; shown: string }>>({});
   const styles = useStyles2(getStyles);
   return (
     <div className={cx(styles.KeyValueTable)} data-testid="KeyValueTable">
@@ -407,13 +390,19 @@ export default function KeyValuesTable(props: KeyValuesTableProps) {
               datasourceType === 'tempo' && isSpanAttribute
                 ? getProtectedAttributeDisplayValue(row.key, row.value)
                 : undefined;
-            const canReveal = displayValue === '[encrypted: key unavailable]' && typeof row.value === 'string';
-            const isRevealed =
-              canReveal &&
-              revealed[i]?.field === row.key &&
-              revealed[i].raw === row.value &&
-              revealed[i].epoch === epoch;
-            const visibleValue = isRevealed ? row.value : displayValue;
+            const protectedValue = displayValue !== undefined && typeof row.value === 'string';
+            const shown = shownValues[i];
+            const visibleValue =
+              protectedValue &&
+              shown?.field === row.key &&
+              shown.raw === row.value &&
+              shown.epoch === epoch
+                ? shown.shown
+                : displayValue === '[encrypted: key unavailable]'
+                  ? 'Locked'
+                  : displayValue === '[encrypted: invalid data]'
+                    ? 'Invalid data'
+                    : displayValue;
             let html = '';
             if (displayValue === undefined) {
               if (row.type === 'code') {
@@ -426,40 +415,33 @@ export default function KeyValuesTable(props: KeyValuesTableProps) {
             }
 
             const jsonTable =
-              displayValue === undefined ? (
+              !protectedValue ? (
                 <div className={styles.jsonTable} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />
-              ) : canReveal ? (
-                <div className={styles.jsonTable} style={{ whiteSpace: 'pre-wrap' }}>
-                  {isRevealed && <span className={styles.ciphertextText}>{row.value}</span>}
-                  {isRevealed && ' '}
-                  <button
-                    type="button"
-                    className={styles.ciphertextButton}
-                    aria-label={`${isRevealed ? 'Hide' : 'Show'} encrypted value for ${row.key}`}
-                    aria-pressed={isRevealed}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setRevealed((current) => {
-                        const next = { ...current };
-                        if (isRevealed) {
-                          delete next[i];
-                        } else {
-                          next[i] = { field: row.key, raw: row.value, epoch };
+              ) : (
+                <div className={styles.jsonTable}>
+                  <ProtectedValue
+                    value={row.value}
+                    displayValue={displayValue}
+                    fieldName={row.key}
+                    epoch={epoch}
+                    onLoadKey={() => {
+                      const kid = getProtectedAttributeKeyId(row.key, row.value);
+                      return kid ? requestProtectedAttributeKey(kid) : false;
+                    }}
+                    onDisplayedValueChange={(text) => {
+                      setShownValues((current) => {
+                        const prior = current[i];
+                        if (prior?.field === row.key && prior.raw === row.value && prior.epoch === epoch && prior.shown === text) {
+                          return current;
                         }
-                        return next;
+                        return { ...current, [i]: { field: row.key, raw: row.value, epoch, shown: text } };
                       });
                     }}
-                  >
-                    {isRevealed ? 'Hide ciphertext' : `${displayValue} · Show ciphertext`}
-                  </button>
-                </div>
-              ) : (
-                <div className={styles.jsonTable} style={{ whiteSpace: 'pre-wrap' }}>
-                  {displayValue}
+                  />
                 </div>
               );
             const links = linksGetter?.(data, i) ?? [];
-            let valueMarkup: ReactNode = canReveal ? (
+            let valueMarkup: ReactNode = protectedValue ? (
               jsonTable
             ) : links.length > 1 ? (
               <LinkValuesMenu links={links} datasourceType={datasourceType} openLinksInSameTab={openLinksInSameTab}>
@@ -476,7 +458,7 @@ export default function KeyValuesTable(props: KeyValuesTableProps) {
             // Skip promo when value markup already has an anchor (jsonMarkup auto-linkifies
             // http(s) strings) to avoid nesting interactive content inside the promo <button>.
             const promo =
-              !canReveal && links.length === 0 && !html.includes('<a ') ? promoGetter?.(row.key) : undefined;
+              !protectedValue && links.length === 0 && !html.includes('<a ') ? promoGetter?.(row.key) : undefined;
             if (promo) {
               valueMarkup = <AttributePluginPromoTip promo={promo}>{valueMarkup}</AttributePluginPromoTip>;
             }

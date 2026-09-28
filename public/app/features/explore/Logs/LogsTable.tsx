@@ -35,7 +35,8 @@ import {
 } from '@grafana/ui';
 import { FILTER_FOR_OPERATOR, FILTER_OUT_OPERATOR } from '@grafana/ui/internal';
 import { DATAPLANE_ID_NAME, type LogsFrame } from 'app/features/logs/logsFrame';
-import { containsProtectedLogValue, inferLogFieldCategory, resolveProtectedLogCell, useProtectedLogDisplayEpoch, withLogFieldProvenance } from 'app/features/logs/components/protectedLogDisplay';
+import { containsProtectedLogValue, inferLogFieldCategory, withLogFieldProvenance } from 'app/features/logs/components/protectedLogDisplay';
+import { ProtectedLogCell } from 'app/features/logs/components/ProtectedLogText';
 import { ProtectedLogsTableCell } from 'app/plugins/panel/logstable/cells/ProtectedLogsTableCell';
 
 import { getFieldLinksForExplore } from '../utils/links';
@@ -83,7 +84,6 @@ export function LogsTable(props: Props) {
   const [columnWidthMap, setColumnWidthMap] = useState<Record<string, number>>({});
   const timeIndex = logsFrame?.timeField.index;
   const styles = useStyles2(getStyles);
-  useProtectedLogDisplayEpoch();
   const theme = useTheme2();
 
   // Extract selected log ID from URL parameter
@@ -215,7 +215,8 @@ export function LogsTable(props: Props) {
                         logRows={props.logRows}
                       />
                       <span className={styles.firstColumnCell}>
-                        {resolveProtectedLogCell(cellProps.field.name, cellProps.value, cellProps.frame, cellProps.rowIndex, cellProps.field.name === logsFrame?.bodyField.name, category) ??
+                        {ProtectedLogCell({ field: cellProps.field.name, value: cellProps.value, frame: cellProps.frame,
+                          rowIndex: cellProps.rowIndex, isBody: cellProps.field.name === logsFrame?.bodyField.name, category }) ??
                           (cellProps.field.display?.(cellProps.value).text ?? String(cellProps.value))}
                       </span>
                     </>

@@ -7,10 +7,10 @@ import { reportInteraction } from '@grafana/runtime';
 import { DataLinkButton, Icon, Toggletip, useStyles2 } from '@grafana/ui';
 
 import { type FieldDef } from '../logParser';
-import { logFieldCategory, resolveProtectedLogField, resolveProtectedLogLine, useProtectedLogDisplayEpoch } from '../protectedLogDisplay';
+import { containsProtectedLogValue, logFieldCategory } from '../protectedLogDisplay';
 
 import { useLogDetailsContext } from './LogDetailsContext';
-import { filterFields, MultipleValue, SingleValue } from './LogLineDetailsFields';
+import { filterFields, MultipleValue, ProtectedDetailValue, SingleValue } from './LogLineDetailsFields';
 import { type LogListFontSize } from './LogList';
 import { useLogListContext } from './LogListContext';
 import { type LogListModel } from './processing';
@@ -62,11 +62,6 @@ const LogLineDetailsField = ({ field, log }: LogLineDetailsFieldProps) => {
   const { closeDetails } = useLogDetailsContext();
 
   const styles = useStyles2(getFieldStyles);
-  useProtectedLogDisplayEpoch();
-  const visibleValues = field.values.map((value, index) => {
-    const key = field.keys[index] ?? field.keys[0];
-    return resolveProtectedLogField(logFieldCategory(log, key, false), key, value);
-  });
 
   const singleKey = field.keys.length === 1;
   const singleValue = field.values.length === 1;
@@ -76,14 +71,23 @@ const LogLineDetailsField = ({ field, log }: LogLineDetailsFieldProps) => {
       <div className={styles.value}>
         <div className={styles.valueContainer}>
           {singleValue ? (
-            <SingleValue value={visibleValues[0]} prettifyJSON={prettifyJSON} />
+            containsProtectedLogValue(field.values[0]) ?
+              <ProtectedDetailValue value={field.values[0]} fieldName={field.keys[0]} category={logFieldCategory(log, field.keys[0], false)} /> :
+              <SingleValue value={field.values[0]} prettifyJSON={prettifyJSON} />
           ) : (
-            <MultipleValue showCopy={true} values={visibleValues} />
+            <table><tbody>{field.values.map((value, index) => {
+              const key = field.keys[index] ?? field.keys[0];
+              return <tr key={`${key}-${index}`}><td>
+                {containsProtectedLogValue(value) ?
+                  <ProtectedDetailValue value={value} fieldName={key} category={logFieldCategory(log, key, false)} /> :
+                  <SingleValue value={value} />}
+              </td></tr>;
+            })}</tbody></table>
           )}
         </div>
       </div>
     ),
-    [visibleValues, singleValue, styles.value, styles.valueContainer, prettifyJSON]
+    [field.values, field.keys, log, singleValue, styles.value, styles.valueContainer, prettifyJSON]
   );
 
   const reportLinkClick = useCallback(() => {
@@ -136,7 +140,7 @@ const LogLineDetailsField = ({ field, log }: LogLineDetailsFieldProps) => {
                   fill: 'outline',
                   onClick: () => reportLinkClick(),
                 }}
-                link={{ ...link, title: resolveProtectedLogLine(link.title) }}
+                link={{ ...link, title: containsProtectedLogValue(link.title) ? 'Protected value' : link.title }}
               />
             </span>
           );

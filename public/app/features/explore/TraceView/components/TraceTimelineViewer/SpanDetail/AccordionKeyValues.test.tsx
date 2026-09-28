@@ -96,31 +96,25 @@ describe('Keyless Tempo span summary', () => {
         <KeyValuesSummary data={[item]} datasourceType="tempo" isSpanAttribute />
       </div>
     );
-
-    const show = screen.getByRole('button', { name: 'Show encrypted value for enc.secret' });
-    expect(show).toHaveTextContent('[encrypted: key unavailable] · Show ciphertext');
+    const locked = screen.getByRole('button', { name: 'Inspect locked value for enc.secret' });
+    expect(locked).toHaveTextContent('Locked');
     await user.tab();
-    expect(show).toHaveFocus();
+    expect(locked).toHaveFocus();
     await user.keyboard('{Enter}');
-    expect(screen.getByText(ciphertext).closest('button, a')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Hide encrypted value for enc.secret' })).toHaveTextContent(
-      'Hide ciphertext'
-    );
+    expect(screen.getByRole('dialog')).toHaveTextContent('630dcd2966c4336691125448bbb25b4f');
+    await user.click(screen.getByRole('button', { name: 'Show ciphertext' }));
+    expect(screen.getByRole('button', { name: 'Show locked value for enc.secret' })).toHaveTextContent(ciphertext);
     expect(item.value).toBe(ciphertext);
     expect(onToggle).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('button', { name: 'Hide encrypted value for enc.secret' }));
-    expect(screen.getByRole('button', { name: 'Show encrypted value for enc.secret' })).toHaveTextContent(
-      '[encrypted: key unavailable] · Show ciphertext'
-    );
-
-    await user.click(screen.getByRole('button', { name: 'Show encrypted value for enc.secret' }));
+    await user.click(screen.getByText(ciphertext));
+    expect(screen.getByRole('button', { name: 'Inspect locked value for enc.secret' })).toHaveTextContent('Locked');
+    await user.click(screen.getByRole('button', { name: 'Inspect locked value for enc.secret' }));
+    await user.click(screen.getByRole('button', { name: 'Show ciphertext' }));
     act(() => {
       registry.epoch++;
       window.dispatchEvent(new Event('grafana.tempo.protected-attribute-display-change'));
     });
-    expect(screen.getByRole('button', { name: 'Show encrypted value for enc.secret' })).toHaveTextContent(
-      '[encrypted: key unavailable] · Show ciphertext'
-    );
+    expect(screen.getByRole('button', { name: 'Inspect locked value for enc.secret' })).toHaveTextContent('Locked');
   });
 
   it('does not reveal other trace sections, malformed envelopes, or invalid ciphertext', () => {
@@ -128,9 +122,9 @@ describe('Keyless Tempo span summary', () => {
     Reflect.set(globalThis, registrySymbol, registry);
     const item = { key: 'enc.secret', value: ciphertext };
     const { rerender } = render(<KeyValuesSummary data={[item]} datasourceType="jaeger" isSpanAttribute />);
-    expect(screen.queryByRole('button', { name: /encrypted value/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /locked value|ciphertext/ })).not.toBeInTheDocument();
     rerender(<KeyValuesSummary data={[item]} datasourceType="tempo" isSpanAttribute={false} />);
-    expect(screen.queryByRole('button', { name: /encrypted value/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /locked value|ciphertext/ })).not.toBeInTheDocument();
     rerender(
       <KeyValuesSummary
         data={[{ key: 'enc.secret', value: `${ciphertext}=` }]}
@@ -138,11 +132,11 @@ describe('Keyless Tempo span summary', () => {
         isSpanAttribute
       />
     );
-    expect(screen.queryByRole('button', { name: /encrypted value/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /locked value|ciphertext/ })).not.toBeInTheDocument();
     registry.resolve.mockReturnValue('[encrypted: invalid data]');
     rerender(<KeyValuesSummary data={[item]} datasourceType="tempo" isSpanAttribute />);
-    expect(screen.getByText('[encrypted: invalid data]')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /encrypted value/ })).not.toBeInTheDocument();
+    expect(screen.getByText('Invalid data')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /locked value|ciphertext/ })).not.toBeInTheDocument();
   });
 });
 

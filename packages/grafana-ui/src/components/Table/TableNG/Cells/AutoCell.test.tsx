@@ -32,73 +32,61 @@ function field(name: string, value: string): Field<string> {
   };
 }
 
-test('shows decrypted protected values locally, then reverts on clear without changing raw cells or links', () => {
+test('shows decrypted text only in the cell, switches to raw inline, and remasks when a key is forgotten', async () => {
+  const user = userEvent.setup();
   const protectedField = field('enc.password', envelope);
   protectedField.config.links = [{ title: 'search', url: '/search' }];
   protectedField.getLinks = jest.fn(() => [
     { title: 'search', href: `/search?value=${protectedField.values[0]}`, target: '_blank', origin: {} },
   ]);
   render(<AutoCell field={protectedField} value={envelope} rowIdx={0} />);
-  expect(screen.getByText(`formatted: ${envelope}`)).toBeInTheDocument();
-
   const resolve = jest.fn(() => 'abc');
   act(() => {
     Reflect.set(globalThis, registrySymbol, { epoch: 1, resolve });
     window.dispatchEvent(new Event(eventName));
   });
-  expect(screen.getByText('abc')).toBeInTheDocument();
-  expect(screen.getByRole('link', { name: 'abc' })).toHaveAttribute('href', `/search?value=${envelope}`);
-  expect(resolve).toHaveBeenCalledWith('enc.password', envelope);
+  expect(screen.getByRole('button', { name: 'Show ciphertext for enc.password' })).toHaveTextContent('abc');
+  expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Show ciphertext for enc.password' }));
+  expect(screen.getByRole('button', { name: 'Show decrypted value for enc.password' })).toHaveTextContent(envelope);
+  await user.click(screen.getByText(envelope));
+  expect(screen.getByRole('button', { name: 'Show ciphertext for enc.password' })).toHaveTextContent('abc');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(protectedField.values[0]).toBe(envelope);
-
+  expect(resolve).toHaveBeenCalledWith('enc.password', envelope);
   act(() => {
     Reflect.set(globalThis, registrySymbol, { epoch: 2, resolve: () => '[encrypted: key unavailable]' });
     window.dispatchEvent(new Event(eventName));
   });
-  expect(screen.getByText('[encrypted: key unavailable]')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Inspect locked value for enc.password' })).toHaveTextContent('Locked');
   expect(protectedField.values[0]).toBe(envelope);
 });
 
-test('reveals canonical keyless ciphertext as text without nesting it inside a data link, then remasks on key changes', async () => {
+test('routes the missing-key request to one editor and reveals raw without following a link', async () => {
   const user = userEvent.setup();
   const protectedField = field('enc.password', envelope);
   protectedField.config.links = [{ title: 'search', url: '/search' }];
-  protectedField.getLinks = jest.fn(() => [
-    { title: 'search', href: `/search?value=${envelope}`, target: '_blank', origin: {} },
-  ]);
-  const registry = { epoch: 1, resolve: jest.fn(() => '[encrypted: key unavailable]') };
+  const requestKey = jest.fn(() => true);
+  const registry = { epoch: 1, resolve: jest.fn(() => '[encrypted: key unavailable]'), requestKey };
   Reflect.set(globalThis, registrySymbol, registry);
   const { rerender } = render(<AutoCell field={protectedField} value={envelope} rowIdx={0} />);
-  const show = screen.getByRole('button', { name: 'Show encrypted value for enc.password' });
-  expect(show).toHaveTextContent('[encrypted: key unavailable] · Show ciphertext');
-  expect(show.closest('a')).toBeNull();
-  expect(screen.queryByText(envelope)).not.toBeInTheDocument();
-
-  await user.tab();
-  expect(show).toHaveFocus();
-  await user.keyboard('{Enter}');
-  expect(screen.getByText(envelope)).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Hide encrypted value for enc.password' })).toHaveTextContent(
-    'Hide ciphertext'
-  );
+  await user.click(screen.getByRole('button', { name: 'Inspect locked value for enc.password' }));
+  expect(screen.getByRole('dialog')).toHaveTextContent('630dcd2966c4336691125448bbb25b4f');
+  await user.click(screen.getByRole('button', { name: 'Load matching key' }));
+  expect(requestKey).toHaveBeenCalledWith('630dcd2966c4336691125448bbb25b4f');
+  expect(requestKey).toHaveBeenCalledTimes(1);
+  await user.click(screen.getByRole('button', { name: 'Inspect locked value for enc.password' }));
+  await user.click(screen.getByRole('button', { name: 'Show ciphertext' }));
+  expect(screen.getByRole('button', { name: 'Show locked value for enc.password' })).toHaveTextContent(envelope);
+  expect(screen.queryByRole('link')).not.toBeInTheDocument();
   expect(protectedField.values[0]).toBe(envelope);
-  expect(screen.getByText(envelope).closest('button, a')).toBeNull();
-  await user.click(screen.getByRole('button', { name: 'Hide encrypted value for enc.password' }));
-  expect(screen.getByRole('button', { name: 'Show encrypted value for enc.password' })).toHaveTextContent(
-    '[encrypted: key unavailable] · Show ciphertext'
-  );
-
-  await user.click(screen.getByRole('button', { name: 'Show encrypted value for enc.password' }));
   act(() => {
     registry.epoch++;
     window.dispatchEvent(new Event(eventName));
   });
-  expect(screen.getByRole('button', { name: 'Show encrypted value for enc.password' })).toHaveTextContent(
-    '[encrypted: key unavailable] · Show ciphertext'
-  );
-
+  expect(screen.getByRole('button', { name: 'Inspect locked value for enc.password' })).toHaveTextContent('Locked');
   rerender(<AutoCell field={protectedField} value={`${envelope}=`} rowIdx={0} />);
-  expect(screen.queryByRole('button', { name: /encrypted value/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /locked value/ })).not.toBeInTheDocument();
   expect(screen.getByText(`formatted: ${envelope}=`)).toBeInTheDocument();
   rerender(<AutoCell field={protectedField} value={envelope} rowIdx={0} />);
   registry.resolve.mockReturnValue('[encrypted: invalid data]');
@@ -106,8 +94,8 @@ test('reveals canonical keyless ciphertext as text without nesting it inside a d
     registry.epoch++;
     window.dispatchEvent(new Event(eventName));
   });
-  expect(screen.queryByRole('button', { name: /encrypted value/ })).not.toBeInTheDocument();
-  expect(screen.getByText('[encrypted: invalid data]')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /locked value/ })).not.toBeInTheDocument();
+  expect(screen.getByText('Invalid data')).toBeInTheDocument();
 });
 
 test('keeps default formatting for ordinary and malformed values even with an imported key', () => {

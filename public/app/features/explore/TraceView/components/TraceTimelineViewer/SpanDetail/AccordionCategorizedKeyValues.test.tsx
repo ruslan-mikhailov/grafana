@@ -214,7 +214,7 @@ describe('protected attributes in categorized span detail', () => {
         label="Span attributes"
       />
     );
-    expect(screen.getByRole('cell', { name: 'abc' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show ciphertext for enc.secret' })).toHaveTextContent('abc');
     expect(screen.getByTestId('attribute-category-other')).toBeInTheDocument();
 
     rerender(
@@ -273,16 +273,10 @@ describe('protected attributes in categorized span detail', () => {
         label="Span attributes"
       />
     );
-
-    await user.click(screen.getByRole('button', { name: 'Show encrypted value for enc.first' }));
-    expect(screen.getByRole('button', { name: 'Hide encrypted value for enc.first' })).toHaveTextContent(
-      'Hide ciphertext'
-    );
-    expect(screen.getByRole('button', { name: 'Show encrypted value for enc.second' })).toHaveTextContent(
-      '[encrypted: key unavailable] · Show ciphertext'
-    );
-    expect(screen.getByText(encryptedValue).closest('button, a')).toBeNull();
-
+    await user.click(screen.getByRole('button', { name: 'Inspect locked value for enc.first' }));
+    await user.click(screen.getByRole('button', { name: 'Show ciphertext' }));
+    expect(screen.getByRole('button', { name: 'Show locked value for enc.first' })).toHaveTextContent(encryptedValue);
+    expect(screen.getByRole('button', { name: 'Inspect locked value for enc.second' })).toHaveTextContent('Locked');
     rerender(
       <AccordionCategorizedKeyValues
         data={data}
@@ -293,11 +287,10 @@ describe('protected attributes in categorized span detail', () => {
       />
     );
     expect(screen.queryByText(encryptedValue)).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Show encrypted value for enc.second' }));
-    expect(screen.getByRole('button', { name: 'Show encrypted value for enc.first' })).toHaveTextContent(
-      '[encrypted: key unavailable] · Show ciphertext'
-    );
-    expect(screen.getByText(encryptedValue).closest('button, a')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Inspect locked value for enc.second' }));
+    await user.click(screen.getByRole('button', { name: 'Show ciphertext' }));
+    expect(screen.getByRole('button', { name: 'Inspect locked value for enc.first' })).toHaveTextContent('Locked');
+    expect(screen.getByRole('button', { name: 'Show locked value for enc.second' })).toHaveTextContent(encryptedValue);
     expect(data[0].value).toBe(encryptedValue);
     expect(data[1].value).toBe(encryptedValue);
   });

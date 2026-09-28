@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 
 import { FieldType, toDataFrame } from '@grafana/data';
 
@@ -34,7 +34,7 @@ it('masks encrypted cells without a key and does not change their frame values o
   const { container } = render(
     <ProtectedLogsTableCell field={frame.fields[0]} frame={frame} rowIndex={0} value={envelope} isBody={false} />
   );
-  expect(screen.getByText('[encrypted: key unavailable]')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Inspect locked value for email' })).toBeVisible();
   expect(container).not.toHaveTextContent(envelope);
   act(() => {
     keyAvailable = true;
@@ -43,6 +43,10 @@ it('masks encrypted cells without a key and does not change their frame values o
   });
   expect(screen.getByText('alice@example.invalid')).toBeVisible();
   expect(frame.fields[0].values[0]).toBe(envelope);
+  fireEvent.click(screen.getByRole('button', { name: 'Show ciphertext for email' }));
+  expect(container).toHaveTextContent(envelope);
+  fireEvent.click(screen.getByRole('button', { name: 'Show decrypted value for email' }));
+  expect(container).toHaveTextContent('alice@example.invalid');
   act(() => {
     keyAvailable = false;
     epoch++;

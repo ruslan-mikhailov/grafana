@@ -9,7 +9,8 @@ import { Button, useStyles2 } from '@grafana/ui';
 
 import { LogMessageAnsi } from '../../logs/components/LogMessageAnsi';
 import { getLogRowStyles } from '../../logs/components/getLogRowStyles';
-import { resolveProtectedLogLine, useProtectedLogDisplayEpoch } from '../../logs/components/protectedLogDisplay';
+import { containsProtectedLogValue } from '../../logs/components/protectedLogDisplay';
+import { ProtectedLogText } from '../../logs/components/ProtectedLogText';
 import { sortLogRows } from '../../logs/utils';
 import { ElapsedTime } from '../ElapsedTime';
 import { filterLogRowsByIndex } from '../state/utils';
@@ -75,7 +76,6 @@ export const LiveLogs = memo(
   ({ logRows, timeZone, stopLive, onPause, onResume, onClear, clearedAtIndex, isPaused }: Props) => {
     const styles = useStyles2(getStyles);
     const { logsRow, logsRowLocalTime, logsRowMessage } = useStyles2(getLogRowStyles);
-    useProtectedLogDisplayEpoch();
     const scrollContainerRef = useRef<HTMLTableSectionElement>(null);
     const [logRowsToRender, setLogRowsToRender] = useState(logRows);
     const [prevClearedAtIndex, setPrevClearedAtIndex] = useState(clearedAtIndex);
@@ -125,10 +125,14 @@ export const LiveLogs = memo(
         <table className={styles.fullWidth}>
           <tbody onScroll={isPaused ? undefined : onScroll} className={styles.logsRowsLive} ref={scrollContainerRef}>
             {rowsToRender.map((row: LogRowModel) => {
+              const protectedEntry = containsProtectedLogValue(row.entry) ? row.entry :
+                containsProtectedLogValue(row.raw) ? row.raw : undefined;
               return (
                 <tr className={cx(logsRow, styles.logsRowFade)} key={row.uid}>
                   <td className={logsRowLocalTime}>{dateTimeFormat(row.timeEpochMs, { timeZone })}</td>
-                  <td className={logsRowMessage}>{row.hasAnsi ? <LogMessageAnsi value={resolveProtectedLogLine(row.raw)} /> : resolveProtectedLogLine(row.entry)}</td>
+                  <td className={logsRowMessage}>{protectedEntry !== undefined ?
+                    <ProtectedLogText value={protectedEntry} /> :
+                    row.hasAnsi ? <LogMessageAnsi value={row.raw} /> : row.entry}</td>
                 </tr>
               );
             })}

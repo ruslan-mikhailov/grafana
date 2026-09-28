@@ -1,5 +1,5 @@
 import { css } from '@emotion/css';
-import { useCallback, useState, memo } from 'react';
+import { useCallback, useRef, useState, memo } from 'react';
 
 import {
   type AbsoluteTimeRange,
@@ -14,7 +14,8 @@ import { ClipboardButton, type CustomCellRendererProps, IconButton, Modal, useTh
 import { getLogsPermalinkRange } from 'app/core/utils/shortLinks';
 import { getUrlStateFromPaneState } from 'app/features/explore/hooks/useStateSync/external.utils';
 import { type LogsFrame, DATAPLANE_ID_NAME } from 'app/features/logs/logsFrame';
-import { resolveProtectedLogLine, useProtectedLogDisplayEpoch } from 'app/features/logs/components/protectedLogDisplay';
+import { containsProtectedLogValue, resolveProtectedLogLine } from 'app/features/logs/components/protectedLogDisplay';
+import { ProtectedLogText } from 'app/features/logs/components/ProtectedLogText';
 import { getState } from 'app/store/store';
 
 import { getExploreBaseUrl } from './utils/url';
@@ -33,17 +34,14 @@ export const LogsTableActionButtons = memo((props: Props) => {
   const { exploreId, absoluteRange, logRows, rowIndex, panelState, displayedFields, logsFrame, frame } = props;
   const theme = useTheme2();
   const [isInspecting, setIsInspecting] = useState(false);
-  useProtectedLogDisplayEpoch();
-  // Get logId from the table frame (frame), not the original logsFrame, because
-  // the table frame is sorted/transformed and rowIndex refers to the table frame
+  const inspectedLine = useRef<HTMLPreElement>(null);
+  // Resolve the ID from this sorted/projected table frame.
   const idFieldName = logsFrame?.idField?.name ?? DATAPLANE_ID_NAME;
   const idField = frame.fields.find((field) => field.name === idFieldName || field.name === DATAPLANE_ID_NAME);
   const logId = idField?.values[rowIndex];
 
-  const getLineValue = () => {
-    const logRowById = logRows?.find((row) => row.rowId === logId);
-    return resolveProtectedLogLine(logRowById?.raw ?? '');
-  };
+  const rawLine = isInspecting ? logRows?.find((row) => row.rowId === logId)?.raw ?? '' : '';
+  const getLineValue = () => inspectedLine.current?.textContent ?? resolveProtectedLogLine(rawLine);
 
   const styles = getStyles(theme);
 
@@ -132,7 +130,8 @@ export const LogsTableActionButtons = memo((props: Props) => {
           isOpen={true}
           title={t('explore.logs-table.action-buttons.inspect-value', 'Inspect value')}
         >
-          <pre>{getLineValue()}</pre>
+          <pre ref={inspectedLine}>{containsProtectedLogValue(rawLine) ?
+            <ProtectedLogText value={rawLine} /> : rawLine}</pre>
           <Modal.ButtonRow>
             <ClipboardButton icon="copy" getText={() => getLineValue()}>
               {t('explore.logs-table.action-buttons.copy-to-clipboard', 'Copy to Clipboard')}
