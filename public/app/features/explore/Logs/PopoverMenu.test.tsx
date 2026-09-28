@@ -1,6 +1,8 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+import { FieldType } from '@grafana/data';
+
 import { createLogRow } from '../../logs/components/mocks/logRow';
 
 import { PopoverMenu } from './PopoverMenu';
@@ -76,6 +78,42 @@ test('Renders copy, line contains filter, and line does not contain filter', () 
   expect(screen.getByText('Copy selection')).toBeInTheDocument();
   expect(screen.getByText('Add as line contains filter')).toBeInTheDocument();
   expect(screen.getByText('Add as line does not contain filter')).toBeInTheDocument();
+});
+
+test.each(['labels', 'metadata'])('keeps decrypted %s selections out of both Explore line filters', (source) => {
+  const envelope = `lenc:v1:${'a'.repeat(32)}:AAAAAAAAAAAAAAAAAAAAAA`;
+  const protectedRow = createLogRow({
+    entry: 'login accepted',
+    ...(source === 'labels' ? { labels: { customer_email: envelope } } : {}),
+  });
+  if (source === 'metadata') {
+    protectedRow.dataFrame.fields.push({
+      name: 'customer_email',
+      type: FieldType.string,
+      config: {},
+      values: [envelope, 'public'],
+    });
+  }
+  const filter = jest.fn();
+  const filterOut = jest.fn();
+  render(
+    <PopoverMenu
+      selection="alice@example.invalid"
+      x={0}
+      y={0}
+      row={protectedRow}
+      close={() => {}}
+      onDisable={() => {}}
+      onClickFilterString={filter}
+      onClickFilterOutString={filterOut}
+    />
+  );
+
+  expect(screen.getByText('Copy selection')).toBeInTheDocument();
+  expect(screen.queryByText('Add as line contains filter')).not.toBeInTheDocument();
+  expect(screen.queryByText('Add as line does not contain filter')).not.toBeInTheDocument();
+  expect(filter).not.toHaveBeenCalled();
+  expect(filterOut).not.toHaveBeenCalled();
 });
 
 test('Can be dismissed with escape', async () => {

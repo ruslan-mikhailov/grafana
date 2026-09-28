@@ -14,6 +14,7 @@ import { TableCellDisplayMode } from '@grafana/ui';
 import { getAllOptionEditors } from 'app/core/components/OptionsUI/registry';
 import { LOG_LINE_BODY_FIELD_NAME } from 'app/features/logs/components/fieldSelector/logFields';
 import { LOGS_DATAPLANE_BODY_NAME, LOGS_DATAPLANE_TIMESTAMP_NAME, parseLogsFrame } from 'app/features/logs/logsFrame';
+import { resolveProtectedLogCell } from 'app/features/logs/components/protectedLogDisplay';
 import { extractFieldsTransformer } from 'app/features/transformers/extractFields/extractFields';
 
 import { DEFAULT_LOG_LEVEL_FIELD_WIDTH } from '../constants';
@@ -354,5 +355,51 @@ describe('useOrganizeFields', () => {
       );
       expect(timeField?.config.custom?.headerTooltip).toBeUndefined();
     });
+  });
+
+  test('preserves distinct row authentication categories in a projected protected column', async () => {
+    const metadataEnvelope = `lenc:v1:${'a'.repeat(32)}:AAAAAAAAAAAAAAAAAAAAAA`;
+    const parsedEnvelope = `lenc:v1:${'b'.repeat(32)}:AAAAAAAAAAAAAAAAAAAAAA`;
+    const source = toDataFrame({
+      meta: { type: DataFrameType.LogLines },
+      fields: [
+        { name: LOGS_DATAPLANE_TIMESTAMP_NAME, type: FieldType.time, values: [1, 2] },
+        { name: LOGS_DATAPLANE_BODY_NAME, type: FieldType.string, values: ['public 1', 'public 2'] },
+        { name: 'email', type: FieldType.string, values: [metadataEnvelope, parsedEnvelope] },
+        { name: 'labelTypes', type: FieldType.other, values: [{ email: 'S' }, { email: 'P' }] },
+      ],
+    });
+    const projected = toDataFrame({ fields: source.fields.filter((field) => field.name !== 'labelTypes') });
+    const symbol = Symbol.for('grafana.loki.protectedLogDisplay.v1');
+    Reflect.set(globalThis, symbol, {
+      epoch: () => 1,
+      subscribe: () => () => {},
+      resolveField: (category: string, field: string, value: string) =>
+        category === 'metadata' && field === 'email' && value === metadataEnvelope ? 'metadata-address' :
+          category === 'line' && field === 'email' && value === parsedEnvelope ? 'parsed-address' : '[encrypted: invalid data]',
+      resolveLine: (line: string) => line,
+    });
+    try {
+      const { result } = renderHook(() => useOrganizeFields({
+        extractedFrame: projected,
+        sourceFrame: source,
+        bodyFieldName: LOGS_DATAPLANE_BODY_NAME,
+        levelFieldName: 'level',
+        logsFrame: parseLogsFrame(source),
+        onPermalinkClick: () => null,
+        options: { displayedFields: ['email'] },
+        supportsPermalink: false,
+        timeFieldName: LOGS_DATAPLANE_TIMESTAMP_NAME,
+        fieldConfig: { defaults: {}, overrides: [] },
+      }));
+      await waitFor(() => expect(result.current.organizedFrame).not.toBeNull());
+      const frame = result.current.organizedFrame!;
+      expect(frame.fields.find((field) => field.name === 'labelTypes')?.config.custom?.hideFrom?.viz).toBe(true);
+      const emailField = frame.fields.find((field) => field.name === 'email')!;
+      expect(resolveProtectedLogCell('email', emailField.values[0], frame, 0, false)).toBe('metadata-address');
+      expect(resolveProtectedLogCell('email', emailField.values[1], frame, 1, false)).toBe('parsed-address');
+    } finally {
+      Reflect.deleteProperty(globalThis, symbol);
+    }
   });
 });

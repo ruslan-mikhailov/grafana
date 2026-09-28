@@ -6,8 +6,10 @@ import { lastValueFrom } from 'rxjs';
 import { type DataFrame, type FieldConfigSource, transformDataFrame } from '@grafana/data';
 import { type CustomCellRendererProps, TableCellDisplayMode } from '@grafana/ui';
 import { type LogsFrame } from 'app/features/logs/logsFrame';
+import { containsProtectedLogValue, inferLogFieldCategory, withLogFieldProvenance } from 'app/features/logs/components/protectedLogDisplay';
 
 import { LOG_LINE_BODY_FIELD_NAME } from '../../../../features/logs/components/fieldSelector/logFields';
+import { ProtectedLogsTableCell } from '../cells/ProtectedLogsTableCell';
 import { LogsTableCustomCellRenderer } from '../cells/LogsTableCustomCellRenderer';
 import { getLogLevelColumnEnhancements } from '../fields/defaultLogLevelColumnConfig';
 import { getTimeFieldWidth } from '../fields/getFieldWidth';
@@ -19,6 +21,7 @@ import { type BuildLinkToLogLine, isBuildLinkToLogLine } from '../types';
 
 interface Props {
   extractedFrame: DataFrame | null;
+  sourceFrame?: DataFrame | null;
   timeFieldName: string;
   levelFieldName: string;
   bodyFieldName: string;
@@ -32,6 +35,7 @@ interface Props {
 
 export function useOrganizeFields({
   extractedFrame,
+  sourceFrame,
   timeFieldName,
   levelFieldName,
   bodyFieldName,
@@ -55,6 +59,7 @@ export function useOrganizeFields({
 
     organizeFields(
       extractedFrame,
+      sourceFrame,
       options,
       logsFrame,
       timeFieldName,
@@ -77,6 +82,7 @@ export function useOrganizeFields({
     bodyFieldName,
     levelFieldName,
     extractedFrame,
+    sourceFrame,
     options,
     timeFieldName,
     logsFrame,
@@ -92,6 +98,7 @@ export function useOrganizeFields({
 
 const organizeFields = async (
   extractedFrame: DataFrame,
+  sourceFrame: DataFrame | null | undefined,
   options: LogsTableOptions,
   logsFrame: LogsFrame,
   timeFieldName: string,
@@ -119,8 +126,14 @@ const organizeFields = async (
     includeByName[field] = true;
   }
 
+  const extractedWithProvenance = withLogFieldProvenance(extractedFrame, sourceFrame ?? extractedFrame);
+  if (!includeByName.labelTypes && extractedWithProvenance.fields.some((field) => field.name === 'labelTypes')) {
+    indexByName.labelTypes = displayedFields.length;
+    includeByName.labelTypes = true;
+  }
+
   const organizedFrame = await lastValueFrom(
-    transformDataFrame(organizeLogsFieldsTransform(indexByName, includeByName), [extractedFrame])
+    transformDataFrame(organizeLogsFieldsTransform(indexByName, includeByName), [extractedWithProvenance])
   );
 
   for (let frameIndex = 0; frameIndex < organizedFrame.length; frameIndex++) {
@@ -133,6 +146,12 @@ const organizeFields = async (
     }
 
     for (const [fieldIndex, field] of frame.fields.entries()) {
+      const protectedColumn = field.values.some((value) =>
+        typeof value === 'string'
+          ? containsProtectedLogValue(value)
+          : value && typeof value === 'object' && Object.values(value).some((item) => typeof item === 'string' && containsProtectedLogValue(item))
+      );
+      const category = protectedColumn ? inferLogFieldCategory(sourceFrame ?? extractedFrame, field.name) : undefined;
       const isFirstField = (!isLevelFirstField && fieldIndex === 0) || (isLevelFirstField && fieldIndex === 1);
       // Deep-merge so panel defaults (e.g. custom.filterable) survive when the field already has custom.* from applyFieldOverrides.
       const baseConfig = merge({}, fieldConfig.defaults, field.config);
@@ -156,14 +175,14 @@ const organizeFields = async (
 
       field.config = {
         ...configAfterLevel,
-        filterable: field.config?.filterable ?? doesFieldSupportAdHocFiltering(field, timeFieldName, bodyFieldName),
+        filterable: !protectedColumn && (field.config?.filterable ?? doesFieldSupportAdHocFiltering(field, timeFieldName, bodyFieldName)),
         custom: {
           ...configAfterLevel.custom,
           width:
             field.name === timeFieldName
               ? getTimeFieldWidth(configAfterLevel.custom?.width, fieldIndex, options)
               : configAfterLevel.custom?.width,
-          inspect: configAfterLevel.custom?.inspect ?? doesFieldSupportInspector(field),
+          inspect: !protectedColumn && (configAfterLevel.custom?.inspect ?? doesFieldSupportInspector(field)),
           ...(field.name === timeFieldName && timeColumnHeaderTooltip
             ? { headerTooltip: timeColumnHeaderTooltip }
             : {}),
@@ -173,6 +192,7 @@ const organizeFields = async (
                   type: TableCellDisplayMode.Custom,
                   cellComponent: (cellProps: CustomCellRendererProps) => (
                     <LogsTableCustomCellRenderer
+                      category={category}
                       logsFrame={logsFrame}
                       supportsPermalink={supportsPermalink}
                       cellProps={cellProps}
@@ -183,7 +203,14 @@ const organizeFields = async (
                     />
                   ),
                 }
-              : configAfterLevel.custom?.cellOptions,
+              : protectedColumn
+                ? {
+                    type: TableCellDisplayMode.Custom,
+                    cellComponent: (cellProps: CustomCellRendererProps) => (
+                      <ProtectedLogsTableCell {...cellProps} isBody={field.name === bodyFieldName} category={category} />
+                    ),
+                  }
+                : configAfterLevel.custom?.cellOptions,
         },
       };
     }

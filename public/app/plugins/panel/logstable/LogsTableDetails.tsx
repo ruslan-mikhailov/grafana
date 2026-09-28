@@ -16,6 +16,7 @@ import { getDragStyles, Icon, ScrollContainer, Tab, TabsBar, usePanelContext, us
 import { LogLineDetailsComponent } from 'app/features/logs/components/panel/LogLineDetailsComponent';
 import { LogLineDetailsHeader } from 'app/features/logs/components/panel/LogLineDetailsHeader';
 import { LogListContextProvider } from 'app/features/logs/components/panel/LogListContext';
+import { containsProtectedLogValue, resolveProtectedLogLine, useProtectedLogDisplayEpoch } from 'app/features/logs/components/protectedLogDisplay';
 
 import { useLogDetailsContext } from './LogDetailsContext';
 import { SETTING_KEY_ROOT } from './constants';
@@ -43,6 +44,7 @@ export const LogsTableDetails = ({ containerElement, options, onOptionsChange, t
     showDetails,
     toggleDetails,
   } = useLogDetailsContext();
+  useProtectedLogDisplayEpoch();
   const [search, setSearch] = useState('');
   const [detailsWidth, setDetailsWidth] = useState(options.logDetailsWidth ?? getDefaultLogDetailsWidth());
   const { onAddAdHocFilter, app } = usePanelContext();
@@ -137,6 +139,9 @@ export const LogsTableDetails = ({ containerElement, options, onOptionsChange, t
 
   const handleFilterFor = useCallback(
     (key: string, value: string) => {
+      if (containsProtectedLogValue(value)) {
+        return;
+      }
       onAddAdHocFilter?.({
         key,
         value,
@@ -148,6 +153,9 @@ export const LogsTableDetails = ({ containerElement, options, onOptionsChange, t
 
   const handleFilterOut = useCallback(
     (key: string, value: string) => {
+      if (containsProtectedLogValue(value)) {
+        return;
+      }
       onAddAdHocFilter?.({
         key,
         value,
@@ -179,7 +187,7 @@ export const LogsTableDetails = ({ containerElement, options, onOptionsChange, t
                   <Tab
                     key={log.uid}
                     truncate
-                    label={log.entry.substring(0, 25)}
+                    label={resolveProtectedLogLine(log.entry).substring(0, 25)}
                     active={currentLog.uid === log.uid}
                     onChangeTab={() => setCurrentLog(log)}
                     suffix={() => (

@@ -10,6 +10,7 @@ import { reportInteraction } from '@grafana/runtime';
 import { getDragStyles, Icon, ScrollContainer, Tab, TabsBar, useStyles2 } from '@grafana/ui';
 
 import { getFieldSelectorWidth } from '../fieldSelector/fieldSelectorUtils';
+import { resolveProtectedLogLine, useProtectedLogDisplayEpoch } from '../protectedLogDisplay';
 
 import { getDetailsScrollPosition, saveDetailsScrollPosition, useLogDetailsContext } from './LogDetailsContext';
 import { LogLineDetailsComponent } from './LogLineDetailsComponent';
@@ -106,6 +107,7 @@ const LogLineDetailsTabs = memo(
       toggleDetails,
     } = useLogDetailsContext();
     const [search, setSearch] = useState('');
+    useProtectedLogDisplayEpoch();
     const inputRef = useRef('');
 
     const styles = useStyles2(getStyles, 'sidebar', undefined, fontSize);
@@ -180,7 +182,7 @@ const LogLineDetailsTabs = memo(
                 <Tab
                   key={log.uid}
                   truncate
-                  label={log.entry.substring(0, 25)}
+                  label={resolveProtectedLogLine(log.entry).substring(0, 25)}
                   active={currentLog.uid === log.uid}
                   onChangeTab={() => setCurrentLog(log)}
                   suffix={() => (

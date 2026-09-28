@@ -35,6 +35,8 @@ import {
 } from '@grafana/ui';
 import { FILTER_FOR_OPERATOR, FILTER_OUT_OPERATOR } from '@grafana/ui/internal';
 import { DATAPLANE_ID_NAME, type LogsFrame } from 'app/features/logs/logsFrame';
+import { containsProtectedLogValue, inferLogFieldCategory, resolveProtectedLogCell, useProtectedLogDisplayEpoch, withLogFieldProvenance } from 'app/features/logs/components/protectedLogDisplay';
+import { ProtectedLogsTableCell } from 'app/plugins/panel/logstable/cells/ProtectedLogsTableCell';
 
 import { getFieldLinksForExplore } from '../utils/links';
 
@@ -81,6 +83,7 @@ export function LogsTable(props: Props) {
   const [columnWidthMap, setColumnWidthMap] = useState<Record<string, number>>({});
   const timeIndex = logsFrame?.timeField.index;
   const styles = useStyles2(getStyles);
+  useProtectedLogDisplayEpoch();
   const theme = useTheme2();
 
   // Extract selected log ID from URL parameter
@@ -141,7 +144,7 @@ export function LogsTable(props: Props) {
         return frame;
       }
 
-      const sortedFrame = sortDataFrame(frame, timeIndex, logsSortOrder === LogsSortOrder.Descending);
+      const sortedFrame = sortDataFrame(withLogFieldProvenance(frame, dataFrame), timeIndex, logsSortOrder === LogsSortOrder.Descending);
 
       const [frameWithOverrides] = applyFieldOverrides({
         data: [sortedFrame],
@@ -182,15 +185,21 @@ export function LogsTable(props: Props) {
         };
 
         // For the first field (time), wrap the cell to include action buttons
+        const protectedColumn = field.values.some((value) =>
+          typeof value === 'string'
+            ? containsProtectedLogValue(value)
+            : value && typeof value === 'object' && Object.values(value).some((item) => typeof item === 'string' && containsProtectedLogValue(item))
+        );
+        const category = protectedColumn ? inferLogFieldCategory(dataFrame, field.name) : undefined;
         const isFirstField = fieldIdx === 0;
 
         field.config = {
           ...field.config,
           custom: {
-            inspect: true,
-            filterable: true, // This sets the columns to be filterable
             width: columnWidthMap[field.name] ?? getInitialFieldWidth(field),
             ...field.config.custom,
+            inspect: !protectedColumn,
+            filterable: !protectedColumn,
             cellOptions: isFirstField
               ? {
                   type: TableCellDisplayMode.Custom,
@@ -206,12 +215,20 @@ export function LogsTable(props: Props) {
                         logRows={props.logRows}
                       />
                       <span className={styles.firstColumnCell}>
-                        {cellProps.field.display?.(cellProps.value).text ?? String(cellProps.value)}
+                        {resolveProtectedLogCell(cellProps.field.name, cellProps.value, cellProps.frame, cellProps.rowIndex, cellProps.field.name === logsFrame?.bodyField.name, category) ??
+                          (cellProps.field.display?.(cellProps.value).text ?? String(cellProps.value))}
                       </span>
                     </>
                   ),
                 }
-              : field.config.custom?.cellOptions,
+              : protectedColumn
+                ? {
+                    type: TableCellDisplayMode.Custom,
+                    cellComponent: (cellProps: CustomCellRendererProps) => (
+                      <ProtectedLogsTableCell {...cellProps} isBody={field.name === logsFrame?.bodyField.name} category={category} />
+                    ),
+                  }
+                : field.config.custom?.cellOptions,
             headerComponent: isFirstField
               ? (headerProps: { defaultContent: React.ReactNode }) => (
                   <div className={styles.firstColumnHeader}>{headerProps.defaultContent}</div>
@@ -219,7 +236,7 @@ export function LogsTable(props: Props) {
               : field.config.custom?.headerComponent,
           },
           // This sets the individual field value as filterable
-          filterable: isFieldFilterable(field, logsFrame?.bodyField.name ?? '', logsFrame?.timeField.name ?? ''),
+          filterable: !protectedColumn && isFieldFilterable(field, logsFrame?.bodyField.name ?? '', logsFrame?.timeField.name ?? ''),
         };
 
         // If it's a string, then try to guess for a better type for numeric support in viz
@@ -229,6 +246,7 @@ export function LogsTable(props: Props) {
       return frameWithOverrides;
     },
     [
+      dataFrame,
       logsSortOrder,
       timeZone,
       splitOpen,
@@ -317,6 +335,9 @@ export function LogsTable(props: Props) {
 
   const onCellFilterAdded = (filter: AdHocFilterItem) => {
     const { value, key, operator } = filter;
+    if (containsProtectedLogValue(value)) {
+      return;
+    }
     const { onClickFilterLabel, onClickFilterOutLabel } = props;
     if (!onClickFilterLabel || !onClickFilterOutLabel) {
       return;

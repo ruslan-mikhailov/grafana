@@ -4,6 +4,7 @@ import { type Field, formattedValueToString, getDisplayProcessor, type GrafanaTh
 import { type CustomCellRendererProps, useStyles2, useTheme2 } from '@grafana/ui';
 import { MaybeWrapWithLink } from '@grafana/ui/internal';
 import { type LogsFrame } from 'app/features/logs/logsFrame';
+import { type Category, resolveProtectedLogCell, useProtectedLogDisplayEpoch } from 'app/features/logs/components/protectedLogDisplay';
 
 import { ROW_ACTION_BUTTON_WIDTH } from '../constants';
 import type { Options as LogsTableOptions } from '../panelcfg.gen';
@@ -16,9 +17,10 @@ export function LogsTableCustomCellRenderer(props: {
   options: LogsTableOptions;
   logsFrame: LogsFrame;
   supportsPermalink: boolean;
+  category?: Category;
 }) {
-  const { logsFrame, buildLinkToLog, options, supportsPermalink } = props;
-  const { field, value, rowIndex } = props.cellProps;
+  const { logsFrame, buildLinkToLog, options, supportsPermalink, category } = props;
+  const { field, frame, value, rowIndex } = props.cellProps;
   const cellPadding =
     options.enableLogDetails && options.showCopyLogLink
       ? ROW_ACTION_BUTTON_WIDTH
@@ -36,7 +38,7 @@ export function LogsTableCustomCellRenderer(props: {
       />
 
       <span className={styles.firstColumnCell}>
-        <AutoCell field={field} value={value} rowIdx={rowIndex} />
+        <AutoCell field={field} frame={frame} value={value} rowIdx={rowIndex} isBody={field.name === logsFrame.bodyField.name} category={category} />
       </span>
     </>
   );
@@ -44,23 +46,24 @@ export function LogsTableCustomCellRenderer(props: {
 
 interface AutoCellProps {
   field: Field;
+  frame: CustomCellRendererProps['frame'];
+  isBody: boolean;
+  category?: Category;
   value: unknown;
   rowIdx: number;
 }
 
 // Copy pasta from packages/grafana-ui/src/components/Table/TableNG/Cells/AutoCell.tsx
-function AutoCell({ value, field, rowIdx }: AutoCellProps) {
+function AutoCell({ value, field, frame, rowIdx, isBody, category }: AutoCellProps) {
   const theme = useTheme2();
-  const display =
-    field.display ??
-    getDisplayProcessor({
-      field,
-      theme,
-    });
+  useProtectedLogDisplayEpoch();
+  const visible = resolveProtectedLogCell(field.name, value, frame, rowIdx, isBody, category);
+  if (visible !== undefined) {
+    return <span>{visible}</span>;
+  }
+  const display = field.display ?? getDisplayProcessor({ field, theme });
+  const formattedValue = formattedValueToString(display(value));
 
-  const displayValue = display(value);
-
-  const formattedValue = formattedValueToString(displayValue);
   return (
     <MaybeWrapWithLink field={field} rowIdx={rowIdx}>
       {formattedValue}

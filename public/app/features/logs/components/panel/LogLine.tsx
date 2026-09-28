@@ -21,6 +21,7 @@ import { Button, Icon, Tooltip } from '@grafana/ui';
 import { LogLabels } from '../LogLabels';
 import { LogMessageAnsi } from '../LogMessageAnsi';
 import { LOG_LINE_BODY_FIELD_NAME, OTEL_LOG_LINE_ATTRIBUTES_FIELD_NAME } from '../fieldSelector/logFields';
+import { containsProtectedLogValue, logFieldCategory, resolveProtectedLogField, resolveProtectedLogLine, useProtectedLogDisplayEpoch } from '../protectedLogDisplay';
 
 import { HighlightedLogRenderer } from './HighlightedLogRenderer';
 import { useLogDetailsContext } from './LogDetailsContext';
@@ -346,6 +347,7 @@ const Log = memo(
     timestampResolution,
     wrapLogMessage,
   }: LogProps) => {
+    useProtectedLogDisplayEpoch();
     const handleLabelsToggle = useCallback(
       (expanded: boolean) => {
         log.uniqueLabelsExpanded = expanded;
@@ -374,6 +376,7 @@ const Log = memo(
               displayAll={log.uniqueLabelsExpanded}
               displayMax={5}
               labels={log.uniqueLabels}
+              log={log}
               onDisplayMaxToggle={handleLabelsToggle}
             />
           </span>
@@ -417,7 +420,7 @@ const DisplayedFields = ({
       if (field === LOG_LINE_BODY_FIELD_NAME) {
         return <LogLineBody log={log} key={field} styles={styles} />;
       }
-      if (field === OTEL_LOG_LINE_ATTRIBUTES_FIELD_NAME && syntaxHighlighting) {
+      if (field === OTEL_LOG_LINE_ATTRIBUTES_FIELD_NAME && syntaxHighlighting && !containsProtectedLogValue(log.getDisplayedFieldValue(field))) {
         const className = isCustomGrammar ? 'field prism-syntax-highlight' : 'field log-syntax-highlight';
         return (
           <span className={className} title={getNormalizedFieldName(field)} key={field}>
@@ -426,7 +429,12 @@ const DisplayedFields = ({
         );
       }
 
-      const fieldValue = log.getDisplayedFieldValue(field);
+      const rawValue = log.getDisplayedFieldValue(field);
+      const fieldValue = field === OTEL_LOG_LINE_ATTRIBUTES_FIELD_NAME
+        ? resolveProtectedLogLine(rawValue)
+        : containsProtectedLogValue(rawValue)
+          ? resolveProtectedLogField(logFieldCategory(log, field, field in log.labels), field, rawValue)
+          : rawValue;
 
       // With wrapped logs, or without unwrapped columns, we skip empty values so they don't appear as an empty space
       if ((wrapLogMessage || !unwrappedColumns) && !fieldValue) {
@@ -453,6 +461,9 @@ const DisplayedFields = ({
 
 const LogLineBody = ({ log, styles }: { log: LogListModel; styles: LogLineStyles }) => {
   const { isCustomGrammar, syntaxHighlighting } = useLogListContext();
+  useProtectedLogDisplayEpoch();
+  const protectedBody = containsProtectedLogValue(log.body);
+  const body = protectedBody ? resolveProtectedLogLine(log.body) : log.body;
   const { matchingUids, search } = useLogListSearchContext();
 
   const highlight = useMemo(() => {
@@ -469,7 +480,7 @@ const LogLineBody = ({ log, styles }: { log: LogListModel; styles: LogLineStyles
   if (log.hasAnsi) {
     return (
       <span className="field no-highlighting log-line-body">
-        <LogMessageAnsi value={log.body} highlight={highlight} />{' '}
+        <LogMessageAnsi value={body} highlight={highlight} />{' '}
       </span>
     );
   }
@@ -477,16 +488,19 @@ const LogLineBody = ({ log, styles }: { log: LogListModel; styles: LogLineStyles
   if (!syntaxHighlighting) {
     return highlight ? (
       <Highlighter
-        textToHighlight={log.body}
+        textToHighlight={body}
         searchWords={highlight.searchWords}
         findChunks={findHighlightChunksInText}
         highlightClassName={styles.matchHighLight}
       />
     ) : (
-      <span className="field no-highlighting log-line-body">{log.body} </span>
+      <span className="field no-highlighting log-line-body">{body} </span>
     );
   }
 
+  if (protectedBody) {
+    return <span className="field no-highlighting log-line-body">{body} </span>;
+  }
   const className = isCustomGrammar
     ? 'field prism-syntax-highlight log-line-body'
     : 'field log-syntax-highlight log-line-body';

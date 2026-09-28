@@ -7,6 +7,7 @@ import { reportInteraction } from '@grafana/runtime';
 import { Dropdown, IconButton, Input, Menu, useStyles2 } from '@grafana/ui';
 
 import { copyText, handleOpenLogsContextClick } from '../../utils';
+import { resolveProtectedLogLine } from '../protectedLogDisplay';
 
 import { useLogDetailsContext } from './LogDetailsContext';
 import { type LogLineDetailsMode } from './LogLineDetails';
@@ -73,7 +74,7 @@ export const LogLineDetailsHeader = ({
   }, [focusLogLine, log, reportInteractionWrapper]);
 
   const copyLogLine = useCallback(() => {
-    copyText(log.entry, containerRef);
+    copyText(resolveProtectedLogLine(log.entry), containerRef);
     reportInteractionWrapper('logs_log_line_details_header_copy_clicked');
   }, [log.entry, reportInteractionWrapper]);
 

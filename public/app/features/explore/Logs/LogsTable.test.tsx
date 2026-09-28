@@ -204,6 +204,43 @@ describe('LogsTable', () => {
     });
   });
 
+  it('displays sorted projected protected cells under their own row authentication category', async () => {
+    const symbol = Symbol.for('grafana.loki.protectedLogDisplay.v1');
+    const metadataEnvelope = `lenc:v1:${'a'.repeat(32)}:AAAAAAAAAAAAAAAAAAAAAA`;
+    const parsedEnvelope = `lenc:v1:${'b'.repeat(32)}:AAAAAAAAAAAAAAAAAAAAAA`;
+    const source = getMockLokiFrame();
+    source.fields.push(
+      { name: 'email', type: FieldType.string, config: {}, values: [metadataEnvelope, parsedEnvelope, 'public'] },
+      { name: 'labelTypes', type: FieldType.other, config: {}, values: [{ email: 'S' }, { email: 'P' }, {}] }
+    );
+    Reflect.set(globalThis, symbol, {
+      epoch: () => 1,
+      subscribe: () => () => {},
+      resolveField: (category: string, field: string, value: string) =>
+        category === 'metadata' && field === 'email' && value === metadataEnvelope ? 'metadata-address' :
+          category === 'line' && field === 'email' && value === parsedEnvelope ? 'parsed-address' : '[encrypted: invalid data]',
+      resolveLine: (line: string) => line,
+    });
+    try {
+      setup({
+        logsFrame: parseLogsFrame(source),
+        columnsWithMeta: {
+          Time: { active: true, percentOfLinesWithLabel: 3, index: 0 },
+          Line: { active: true, percentOfLinesWithLabel: 3, index: 1 },
+          email: { active: true, percentOfLinesWithLabel: 2, index: 2 },
+        },
+      }, source);
+
+      expect(await screen.findByText('parsed-address')).toBeVisible();
+      expect(screen.getByText('metadata-address')).toBeVisible();
+      expect(screen.queryByText(metadataEnvelope)).not.toBeInTheDocument();
+      expect(screen.queryByText(parsedEnvelope)).not.toBeInTheDocument();
+      expect(screen.queryByRole('columnheader', { name: 'labelTypes' })).not.toBeInTheDocument();
+    } finally {
+      Reflect.deleteProperty(globalThis, symbol);
+    }
+  });
+
   describe('LogsTable (loki dataplane)', () => {
     beforeEach(() => {
       setBooleanFlags({

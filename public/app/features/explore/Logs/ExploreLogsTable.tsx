@@ -19,6 +19,7 @@ import { type Options } from 'app/plugins/panel/logstable/options/types';
 import { defaultOptions as logsTablePanelDefaultOptions } from 'app/plugins/panel/logstable/panelcfg.gen';
 import { type BuildLinkToLogLine } from 'app/plugins/panel/logstable/types';
 
+import { containsProtectedLogValue } from 'app/features/logs/components/protectedLogDisplay';
 import { SETTING_KEY_ROOT } from './utils/logs';
 
 interface Props {
@@ -53,7 +54,7 @@ export function ExploreLogsTable(props: Props) {
   const handleAdHocFilter = useCallback(
     (filter: AdHocFilterItem) => {
       const { value, key, operator } = filter;
-      if (!onClickFilterLabel || !onClickFilterOutLabel) {
+      if (containsProtectedLogValue(value) || !onClickFilterLabel || !onClickFilterOutLabel) {
         return;
       }
       if (operator === FILTER_FOR_OPERATOR) {

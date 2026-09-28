@@ -7,6 +7,7 @@ import { reportInteraction } from '@grafana/runtime';
 import { Menu, useStyles2 } from '@grafana/ui';
 
 import { copyText } from '../../logs/utils';
+import { containsProtectedLogValue } from '../../logs/components/protectedLogDisplay';
 
 interface PopoverMenuProps {
   selection: string;
@@ -53,6 +54,15 @@ export const PopoverMenu = ({
   }, [props, row.datasourceType, selection.length]);
 
   const supported = onClickFilterString || onClickFilterOutString || onClickSearchString;
+  const canFilter = !containsProtectedLogValue(row.entry) &&
+    !containsProtectedLogValue(row.raw) &&
+    !Object.values(row.labels).some(containsProtectedLogValue) &&
+    !Object.values(row.uniqueLabels ?? {}).some(containsProtectedLogValue) &&
+    !row.dataFrame.fields.some(({ values }) => {
+      const value = values[row.rowIndex];
+      return containsProtectedLogValue(value) ||
+        (value && typeof value === 'object' && Object.values(value).some(containsProtectedLogValue));
+    });
 
   if (!supported) {
     return null;
@@ -70,7 +80,7 @@ export const PopoverMenu = ({
               track('copy', selection.length, row.datasourceType);
             }}
           />
-          {onClickFilterString && (
+          {canFilter && onClickFilterString && (
             <Menu.Item
               label={t('logs.popover-menu.line-contains', 'Add as line contains filter')}
               onClick={() => {
@@ -80,7 +90,7 @@ export const PopoverMenu = ({
               }}
             />
           )}
-          {onClickFilterOutString && (
+          {canFilter && onClickFilterOutString && (
             <Menu.Item
               label={t('logs.popover-menu.line-contains-not', 'Add as line does not contain filter')}
               onClick={() => {

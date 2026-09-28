@@ -9,6 +9,7 @@ import { Button, useStyles2 } from '@grafana/ui';
 
 import { LogMessageAnsi } from '../../logs/components/LogMessageAnsi';
 import { getLogRowStyles } from '../../logs/components/getLogRowStyles';
+import { resolveProtectedLogLine, useProtectedLogDisplayEpoch } from '../../logs/components/protectedLogDisplay';
 import { sortLogRows } from '../../logs/utils';
 import { ElapsedTime } from '../ElapsedTime';
 import { filterLogRowsByIndex } from '../state/utils';
@@ -74,6 +75,7 @@ export const LiveLogs = memo(
   ({ logRows, timeZone, stopLive, onPause, onResume, onClear, clearedAtIndex, isPaused }: Props) => {
     const styles = useStyles2(getStyles);
     const { logsRow, logsRowLocalTime, logsRowMessage } = useStyles2(getLogRowStyles);
+    useProtectedLogDisplayEpoch();
     const scrollContainerRef = useRef<HTMLTableSectionElement>(null);
     const [logRowsToRender, setLogRowsToRender] = useState(logRows);
     const [prevClearedAtIndex, setPrevClearedAtIndex] = useState(clearedAtIndex);
@@ -126,7 +128,7 @@ export const LiveLogs = memo(
               return (
                 <tr className={cx(logsRow, styles.logsRowFade)} key={row.uid}>
                   <td className={logsRowLocalTime}>{dateTimeFormat(row.timeEpochMs, { timeZone })}</td>
-                  <td className={logsRowMessage}>{row.hasAnsi ? <LogMessageAnsi value={row.raw} /> : row.entry}</td>
+                  <td className={logsRowMessage}>{row.hasAnsi ? <LogMessageAnsi value={resolveProtectedLogLine(row.raw)} /> : resolveProtectedLogLine(row.entry)}</td>
                 </tr>
               );
             })}

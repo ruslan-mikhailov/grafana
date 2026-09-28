@@ -107,6 +107,23 @@ describe.each(fontSizes)('LogLine', (fontSize: LogListFontSize) => {
     expect(screen.getByText(log.timestamp)).toBeInTheDocument();
     expect(screen.getByText('log message 1')).toBeInTheDocument();
   });
+  test('masks protected logfmt values without mutating the log row', () => {
+    const envelope = `lenc:v1:${'a'.repeat(32)}:AAAAAAAAAAAAAAAAAAAAAA`;
+    const entry = `event=login email=\"${envelope}\" outcome=accepted`;
+    log = createLogLine(
+      { entry, raw: entry, labels: { place: 'luna', namespace: envelope } },
+      { escape: false, order: LogsSortOrder.Descending, timeZone: 'browser', virtualization, wrapLogMessage: true }
+    );
+    render(
+      <LogListContextProvider {...contextProps} showUniqueLabels>
+        <LogLine {...defaultProps} log={log} logs={[log]} />
+      </LogListContextProvider>
+    );
+    expect(screen.getByText(/email=\"\\[encrypted: key unavailable\\]\"/)).toHaveTextContent('outcome=accepted');
+    expect(screen.queryByText(new RegExp(envelope))).not.toBeInTheDocument();
+    expect(log.entry).toBe(entry);
+    expect(log.labels.namespace).toBe(envelope);
+  });
 
   test('Renders a log line with no timestamp', () => {
     render(

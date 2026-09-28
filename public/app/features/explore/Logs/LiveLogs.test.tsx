@@ -116,4 +116,15 @@ describe('LiveLogs', () => {
     expect(logList[0]).toHaveAttribute('style', 'color: rgb(204, 0, 0);');
     expect(logList[1]).toHaveAttribute('style', 'color: rgb(204, 102, 0);');
   });
+  it('masks live encrypted logfmt fields while retaining the streamed row bytes', () => {
+    const envelope = `lenc:v1:${'a'.repeat(32)}:AAAAAAAAAAAAAAAAAAAAAA`;
+    const entry = `event=login email=\"${envelope}\" outcome=accepted`;
+    const rows = makeLogs(1, { entry, raw: entry });
+    setup(rows);
+
+    expect(screen.getByRole('cell', { name: 'event=login email=\"[encrypted: key unavailable]\" outcome=accepted' }))
+      .toBeVisible();
+    expect(rows[0].entry).toBe(entry);
+    expect(rows[0].raw).toBe(entry);
+  });
 });

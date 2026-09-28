@@ -234,6 +234,7 @@ export const LogsTable = ({
   // Organize fields transform
   const { organizedFrame } = useOrganizeFields({
     extractedFrame,
+    sourceFrame: rawTableFrame,
     timeFieldName,
     levelFieldName,
     bodyFieldName,

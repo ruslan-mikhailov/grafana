@@ -8,6 +8,7 @@ import { IconButton, useStyles2 } from '@grafana/ui';
 
 import { LogMessageAnsi } from '../LogMessageAnsi';
 import { LOG_LINE_BODY_FIELD_NAME } from '../fieldSelector/logFields';
+import { containsProtectedLogValue, resolveProtectedLogLine, useProtectedLogDisplayEpoch } from '../protectedLogDisplay';
 
 import { HighlightedLogRenderer } from './HighlightedLogRenderer';
 import { getStyles } from './LogLine';
@@ -32,10 +33,13 @@ export const LogLineDetailsLog = memo(({ log: originalLog, prettifyJSON, syntaxH
   } = useLogListContext();
   const logStyles = useStyles2(getStyles);
   const styles = useStyles2(getLogLineDetailsLogStyles);
+  useProtectedLogDisplayEpoch();
   const log = useMemo(() => {
     const log = originalLog.clone({ prettifyJSON });
     return log;
   }, [originalLog, prettifyJSON]);
+  const protectedBody = containsProtectedLogValue(log.body);
+  const body = protectedBody ? resolveProtectedLogLine(log.body) : log.body;
 
   const filterLogLine = useCallback(() => {
     onClickFilterString?.(log.entry, log.dataFrame?.refId);
@@ -70,7 +74,7 @@ export const LogLineDetailsLog = memo(({ log: originalLog, prettifyJSON, syntaxH
     }
   }, [logLineDisplayed, noInteractions, onClickHideField, onClickShowField]);
 
-  const supportsFilters = onClickFilterString || onClickFilterOutString;
+  const supportsFilters = !containsProtectedLogValue(log.entry) && (onClickFilterString || onClickFilterOutString);
   const showLogLineToggle = onClickHideField && onClickShowField && displayedFields.length > 0;
   const showActions = supportsFilters || showLogLineToggle;
 
@@ -80,7 +84,7 @@ export const LogLineDetailsLog = memo(({ log: originalLog, prettifyJSON, syntaxH
         <div className={logStyles.wrappedLogLine}>
           {showActions && (
             <span className={styles.actions}>
-              {onClickFilterString && (
+              {onClickFilterString && !containsProtectedLogValue(log.entry) && (
                 <IconButton
                   name="search-plus"
                   size={fontSize === 'small' ? 'sm' : undefined}
@@ -88,7 +92,7 @@ export const LogLineDetailsLog = memo(({ log: originalLog, prettifyJSON, syntaxH
                   tooltip={t('logs.log-line-details.filter-for-log-line', 'Filter for this log line')}
                 />
               )}
-              {onClickFilterOutString && (
+              {onClickFilterOutString && !containsProtectedLogValue(log.entry) && (
                 <IconButton
                   name="search-minus"
                   size={fontSize === 'small' ? 'sm' : undefined}
@@ -115,16 +119,17 @@ export const LogLineDetailsLog = memo(({ log: originalLog, prettifyJSON, syntaxH
           )}
           {log.hasAnsi ? (
             <span className="field no-highlighting">
-              <LogMessageAnsi value={log.body} />
+              <LogMessageAnsi value={body} />
             </span>
           ) : (
             <>
-              {!syntaxHighlighting && <span className="field no-highlighting">{log.body}</span>}
-              {syntaxHighlighting && (
+              {!syntaxHighlighting && <span className="field no-highlighting">{body}</span>}
+              {syntaxHighlighting && !protectedBody && (
                 <span className="field log-syntax-highlight">
                   {<HighlightedLogRenderer tokens={log.highlightedBodyTokens} />}
                 </span>
               )}
+              {syntaxHighlighting && protectedBody && <span className="field no-highlighting">{body}</span>}
             </>
           )}
         </div>

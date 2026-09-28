@@ -21,6 +21,7 @@ import { calculateLogsLabelStats, calculateStats } from '../../utils';
 import { LogLabelStats } from '../LogLabelStats';
 import { OTEL_LOG_LINE_ATTRIBUTES_FIELD_NAME } from '../fieldSelector/logFields';
 import { type FieldDef } from '../logParser';
+import { containsProtectedLogValue, logFieldCategory, resolveProtectedLogField, resolveProtectedLogLine, useProtectedLogDisplayEpoch } from '../protectedLogDisplay';
 
 import { AsyncIconButton } from './AsyncIconButton';
 import { useLogDetailsContext } from './LogDetailsContext';
@@ -154,6 +155,7 @@ const LogLineDetailsField = ({
   const [showFieldsStats, setShowFieldStats] = useState(false);
   const [fieldCount, setFieldCount] = useState(0);
   const [fieldStats, setFieldStats] = useState<LogLabelStatsModel[] | null>(null);
+  useProtectedLogDisplayEpoch();
   const { fontSize } = useLogListContext();
   const {
     app,
@@ -320,7 +322,14 @@ const LogLineDetailsField = ({
   const singleKey = keys.length === 1;
   const singleValue = values.length === 1;
 
-  const fieldSupportsFilters = keys[0] !== OTEL_LOG_LINE_ATTRIBUTES_FIELD_NAME;
+  const fieldSupportsFilters = keys[0] !== OTEL_LOG_LINE_ATTRIBUTES_FIELD_NAME && !values.some(containsProtectedLogValue);
+  const visibleValues = values.map((value, index) => {
+    if (!containsProtectedLogValue(value)) {
+      return value;
+    }
+    const key = keys[index] ?? keys[0];
+    return resolveProtectedLogField(logFieldCategory(log, key, Boolean(isLabel)), key, value);
+  });
 
   return (
     <>
@@ -378,7 +387,7 @@ const LogLineDetailsField = ({
                 size={fontSize === 'small' ? 'sm' : undefined}
                 tooltip={t('logs.log-line-details.fields.adhoc-statistics', 'Ad-hoc statistics')}
                 className={styles.statsIcon}
-                disabled={!singleKey}
+                disabled={!singleKey || values.some(containsProtectedLogValue)}
                 onClick={showStats}
               />
             </div>
@@ -390,9 +399,9 @@ const LogLineDetailsField = ({
         <div className={styles.value}>
           <div className={styles.valueContainer}>
             {singleValue ? (
-              <SingleValue value={values[0]} prettifyJSON={prettifyJSON} />
+              <SingleValue value={visibleValues[0]} prettifyJSON={prettifyJSON} />
             ) : (
-              <MultipleValue showCopy={true} values={values} />
+              <MultipleValue showCopy={true} values={visibleValues} />
             )}
           </div>
         </div>
@@ -425,13 +434,13 @@ const LogLineDetailsField = ({
                   onClick: () => reportLinkClick(link),
                   ...(link.icon && { icon: link.icon }),
                 }}
-                link={link}
+                link={{ ...link, title: resolveProtectedLogLine(link.title) }}
               />
             </div>
           </div>
         );
       })}
-      {showFieldsStats && fieldStats && (
+      {showFieldsStats && fieldStats && !values.some(containsProtectedLogValue) && (
         <div className={styles.row}>
           <div className={disableActions ? undefined : styles.statsColumn}>
             <LogLabelStats

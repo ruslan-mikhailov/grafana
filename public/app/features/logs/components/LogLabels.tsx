@@ -1,17 +1,19 @@
 import { css } from '@emotion/css';
 import { memo, forwardRef, useMemo, useState, type JSX } from 'react';
 
-import { type GrafanaTheme2, type Labels } from '@grafana/data';
+import { type GrafanaTheme2, type Labels, type LogRowModel } from '@grafana/data';
 import { t } from '@grafana/i18n';
 import { Button, Icon, Tooltip, useStyles2 } from '@grafana/ui';
 
 import { getNormalizedFieldName } from './panel/processing';
+import { containsProtectedLogValue, logFieldCategory, resolveProtectedLogField, useProtectedLogDisplayEpoch } from './protectedLogDisplay';
 
 // Levels are already encoded in color, filename is a Loki-ism
 const HIDDEN_LABELS = ['detected_level', 'level', 'lvl', 'filename'];
 
 export interface Props {
   labels: Labels;
+  log?: LogRowModel;
   emptyMessage?: string;
   addTooltip?: boolean;
   displayMax?: number;
@@ -22,6 +24,7 @@ export interface Props {
 export const LogLabels = memo(
   ({
     labels,
+    log,
     emptyMessage,
     addTooltip = true,
     displayMax,
@@ -29,13 +32,14 @@ export const LogLabels = memo(
     displayAll: initialDisplayAll = false,
   }: Props) => {
     const [displayAll, setDisplayAll] = useState<boolean | undefined>(displayMax ? initialDisplayAll : undefined);
+    const epoch = useProtectedLogDisplayEpoch();
     const styles = useStyles2(getStyles);
     const allLabels = useMemo(
       () =>
         Object.keys(labels)
           .filter((label) => !label.startsWith('_') && !HIDDEN_LABELS.includes(label) && labels[label])
-          .map((label) => `${label}=${labels[label]}`),
-      [labels]
+          .map((label) => `${label}=${containsProtectedLogValue(labels[label]) ? resolveProtectedLogField(log ? logFieldCategory(log, label, true) : 'label', label, labels[label]) : labels[label]}`),
+      [labels, log, epoch]
     );
     const displayLabels = useMemo(
       () => allLabels.slice(0, !displayAll && displayMax ? displayMax : Infinity),

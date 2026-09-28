@@ -7,6 +7,7 @@ import { reportInteraction } from '@grafana/runtime';
 import { DataLinkButton, Icon, Toggletip, useStyles2 } from '@grafana/ui';
 
 import { type FieldDef } from '../logParser';
+import { logFieldCategory, resolveProtectedLogField, resolveProtectedLogLine, useProtectedLogDisplayEpoch } from '../protectedLogDisplay';
 
 import { useLogDetailsContext } from './LogDetailsContext';
 import { filterFields, MultipleValue, SingleValue } from './LogLineDetailsFields';
@@ -61,6 +62,11 @@ const LogLineDetailsField = ({ field, log }: LogLineDetailsFieldProps) => {
   const { closeDetails } = useLogDetailsContext();
 
   const styles = useStyles2(getFieldStyles);
+  useProtectedLogDisplayEpoch();
+  const visibleValues = field.values.map((value, index) => {
+    const key = field.keys[index] ?? field.keys[0];
+    return resolveProtectedLogField(logFieldCategory(log, key, false), key, value);
+  });
 
   const singleKey = field.keys.length === 1;
   const singleValue = field.values.length === 1;
@@ -70,14 +76,14 @@ const LogLineDetailsField = ({ field, log }: LogLineDetailsFieldProps) => {
       <div className={styles.value}>
         <div className={styles.valueContainer}>
           {singleValue ? (
-            <SingleValue value={field.values[0]} prettifyJSON={prettifyJSON} />
+            <SingleValue value={visibleValues[0]} prettifyJSON={prettifyJSON} />
           ) : (
-            <MultipleValue showCopy={true} values={field.values} />
+            <MultipleValue showCopy={true} values={visibleValues} />
           )}
         </div>
       </div>
     ),
-    [field.values, singleValue, styles.value, styles.valueContainer, prettifyJSON]
+    [visibleValues, singleValue, styles.value, styles.valueContainer, prettifyJSON]
   );
 
   const reportLinkClick = useCallback(() => {
@@ -130,7 +136,7 @@ const LogLineDetailsField = ({ field, log }: LogLineDetailsFieldProps) => {
                   fill: 'outline',
                   onClick: () => reportLinkClick(),
                 }}
-                link={link}
+                link={{ ...link, title: resolveProtectedLogLine(link.title) }}
               />
             </span>
           );
