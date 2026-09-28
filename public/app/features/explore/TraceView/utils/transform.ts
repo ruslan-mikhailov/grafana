@@ -3,6 +3,22 @@ import { type DataFrame, DataFrameView, type TraceSpanRow } from '@grafana/data'
 import transformTraceData from '../components/model/transform-trace-data';
 import { type Trace, type TraceProcess, type TraceResponse } from '../components/types/trace';
 
+// Blind-index attributes belong to Tempo's search index, not the trace viewer.
+// Keep the original trace and its DataFrame intact for links and raw exports.
+export function traceForDisplay(trace: Trace, datasourceType: string): Trace {
+  if (datasourceType !== 'tempo' || !trace.spans.some((span) => span.tags.some((tag) => tag.key.startsWith('bi.')))) {
+    return trace;
+  }
+
+  return {
+    ...trace,
+    spans: trace.spans.map((span) => {
+      const tags = span.tags.filter((tag) => !tag.key.startsWith('bi.'));
+      return tags.length === span.tags.length ? span : { ...span, tags };
+    }),
+  };
+}
+
 export function transformDataFrames(frame?: DataFrame): Trace | null {
   if (!frame) {
     return null;

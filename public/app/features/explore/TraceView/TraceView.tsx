@@ -46,6 +46,7 @@ import { useDetailState } from './useDetailState';
 import { useHoverIndentGuide } from './useHoverIndentGuide';
 import { useSearch } from './useSearch';
 import { useViewRange } from './useViewRange';
+import { traceForDisplay } from './utils/transform';
 
 const ADAPTIVE_TRACES_APP_PLUGIN_ID = 'grafana-adaptivetraces-app' as const;
 
@@ -89,6 +90,8 @@ export function TraceView(props: Props) {
     spanFilters,
     hideHeaderDetails = false,
   } = props;
+  const datasourceType = datasource?.type ?? 'unknown';
+  const displayTrace = useMemo(() => traceForDisplay(traceProp, datasourceType), [traceProp, datasourceType]);
 
   const {
     detailStates,
@@ -121,7 +124,7 @@ export function TraceView(props: Props) {
 
     return traceProp?.spans?.some((span) => spanHasAdaptiveTraceRestoredTag(span.tags ?? []));
   }, [isAdaptiveTracesAppInstalled, traceProp]);
-  const { search, setSearch, spanFilterMatches } = useSearch(exploreId, traceProp?.spans, spanFilters, criticalPath);
+  const { search, setSearch, spanFilterMatches } = useSearch(exploreId, displayTrace?.spans, spanFilters, criticalPath);
 
   // Search next/prev re-applies the current match whenever the matches Set is rebuilt
   // (every filter keystroke). Reuse the object when the id is unchanged so the timeline
@@ -198,7 +201,7 @@ export function TraceView(props: Props) {
         traceToProfilesOptions,
         dataFrame: props.dataFrames[0],
         createFocusSpanLink,
-        trace: traceProp,
+        trace: displayTrace,
         dataLinkPostProcessor: dataLinksContext?.dataLinkPostProcessor,
         logsDataSourceSettings,
         metricsDataSourceSettings,
@@ -211,7 +214,7 @@ export function TraceView(props: Props) {
       traceToProfilesOptions,
       props.dataFrames,
       createFocusSpanLink,
-      traceProp,
+      displayTrace,
       createSpanLinkFromProps,
       dataLinksContext?.dataLinkPostProcessor,
       logsDataSourceSettings,
@@ -225,7 +228,7 @@ export function TraceView(props: Props) {
       createTraceLogsLink({
         splitOpenFn: props.splitOpenFn,
         traceToLogsOptions,
-        trace: traceProp,
+        trace: displayTrace,
         dataFrame: props.dataFrames[0],
         dataLinkPostProcessor: dataLinksContext?.dataLinkPostProcessor,
         logsDataSourceSettings,
@@ -235,14 +238,13 @@ export function TraceView(props: Props) {
       props.splitOpenFn,
       props.dataFrames,
       traceToLogsOptions,
-      traceProp,
+      displayTrace,
       dataLinksContext?.dataLinkPostProcessor,
       logsDataSourceSettings,
       instanceSettings,
     ]
   );
   const timeZone = useSelector((state) => getTimeZone(state.user));
-  const datasourceType = datasource ? datasource?.type : 'unknown';
   const datasourceName = datasource ? datasource?.name : 'unknown';
   const datasourceUid = datasource ? datasource?.uid : '';
   const scrollElement = props.scrollElement
@@ -310,7 +312,7 @@ export function TraceView(props: Props) {
           {isRestoredByAdaptiveTraces && <AdaptiveTracesRestoredBanner key={traceProp.traceID} />}
 
           <TracePageHeader
-            trace={traceProp}
+            trace={displayTrace}
             data={props.dataFrames[0]}
             timeZone={timeZone}
             search={search}
@@ -334,7 +336,7 @@ export function TraceView(props: Props) {
 
           <TraceTimelineViewer
             findMatchesIDs={spanFilterMatches}
-            trace={traceProp}
+            trace={displayTrace}
             traceToProfilesOptions={traceToProfilesOptions}
             datasourceType={datasourceType}
             datasourceUid={datasourceUid}

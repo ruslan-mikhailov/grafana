@@ -49,7 +49,7 @@ function mockPluginInstalled(installedPluginIds: string[] = []) {
   }));
 }
 
-function getTraceView(frames: DataFrame[], spanFilters?: TraceSearchProps) {
+function getTraceView(frames: DataFrame[], spanFilters?: TraceSearchProps, datasourceType?: string) {
   const store = configureStore();
   const topOfViewRef = createRef<HTMLDivElement>();
 
@@ -59,7 +59,9 @@ function getTraceView(frames: DataFrame[], spanFilters?: TraceSearchProps) {
         dataFrames={frames}
         splitOpenFn={() => {}}
         traceProp={transformDataFrames(frames[0])!}
-        datasource={undefined}
+        datasource={
+          datasourceType ? ({ type: datasourceType } as NonNullable<Parameters<typeof TraceView>[0]['datasource']>) : undefined
+        }
         topOfViewRef={topOfViewRef}
         timeRange={mockTimeRange()}
         spanFilters={spanFilters}
@@ -68,8 +70,8 @@ function getTraceView(frames: DataFrame[], spanFilters?: TraceSearchProps) {
   );
 }
 
-function renderTraceView(frames = [frameOld], spanFilters?: TraceSearchProps) {
-  const { container, baseElement } = render(getTraceView(frames, spanFilters));
+function renderTraceView(frames = [frameOld], spanFilters?: TraceSearchProps, datasourceType?: string) {
+  const { container, baseElement } = render(getTraceView(frames, spanFilters, datasourceType));
 
   return {
     header: container.children[0],
@@ -330,6 +332,73 @@ describe('TraceView', () => {
       // Navigating straight from one restored trace to another must surface the banner again.
       rerender(getTraceView([frameRestoredByAdaptiveTracesB]));
       expect(await screen.findByText(restoredBannerTitle)).toBeInTheDocument();
+    });
+  });
+  describe('Tempo blind-index display', () => {
+    const registrySymbol = Symbol.for('grafana.tempo.protected-attribute-display.v1');
+    const originalRegistry = Reflect.get(globalThis, registrySymbol);
+    const ciphertext = 'enc:v1:630dcd2966c4336691125448bbb25b4f:7aUwjY5fPtHvu_dUnzcxBJc6XQ';
+    const blindIndex = ['bi:v1:630dcd2966c4336691125448bbb25b4f:KzU4fvUX'];
+
+    afterEach(() => {
+      if (originalRegistry === undefined) {
+        Reflect.deleteProperty(globalThis, registrySymbol);
+      } else {
+        Reflect.set(globalThis, registrySymbol, originalRegistry);
+      }
+    });
+
+    it.each([
+      ['a loaded browser key', 'decrypted-secret'],
+      ['an unavailable browser key', '[encrypted: key unavailable]'],
+    ])('hides the index while displaying enc with %s in expanded and collapsed details', async (_, displayedValue) => {
+      const resolve = jest.fn(() => displayedValue);
+      Reflect.set(globalThis, registrySymbol, { epoch: 1, resolve });
+      const tags = [
+        ...frameNew.fields.find((field) => field.name === 'tags')!.values[0],
+        { key: 'bi.secret', value: blindIndex },
+        { key: 'enc.secret', value: ciphertext },
+        { key: 'http.note', value: 'visible-tag' },
+      ];
+      const frame = new MutableDataFrame({
+        fields: frameNew.fields.map((field) => ({
+          name: field.name,
+          values: field.name === 'tags' ? [tags, ...field.values.slice(1)] : field.values,
+        })),
+        meta: { preferredVisualisationType: 'trace' },
+      });
+
+      renderTraceView([frame], undefined, 'tempo');
+      await userEvent.click(screen.getAllByText('', { selector: 'div[data-testid="span-view"]' })[0]);
+
+      expect(screen.queryByText('bi.secret')).not.toBeInTheDocument();
+      expect(screen.queryByText(blindIndex[0])).not.toBeInTheDocument();
+      expect(screen.getByRole('cell', { name: 'enc.secret' })).toBeInTheDocument();
+      expect(screen.getByRole('cell', { name: 'http.note' })).toBeInTheDocument();
+      expect(resolve).toHaveBeenCalledWith('enc.secret', ciphertext);
+      if (displayedValue === '[encrypted: key unavailable]') {
+        expect(screen.getByRole('button', { name: 'Show encrypted value for enc.secret' })).toHaveTextContent(displayedValue);
+      } else {
+        expect(screen.getByText(displayedValue)).toBeInTheDocument();
+      }
+
+      await userEvent.click(screen.getByRole('switch', { name: /Span attributes/ }));
+      expect(screen.getByText('enc.secret')).toBeInTheDocument();
+      expect(screen.queryByText('bi.secret')).not.toBeInTheDocument();
+      expect(screen.queryByText(blindIndex[0])).not.toBeInTheDocument();
+      if (displayedValue === '[encrypted: key unavailable]') {
+        expect(screen.getByRole('button', { name: 'Show encrypted value for enc.secret' })).toHaveTextContent(displayedValue);
+      } else {
+        expect(screen.getByText(displayedValue)).toBeInTheDocument();
+      }
+      expect(frame.fields.find((field) => field.name === 'tags')!.values[0]).toContainEqual({
+        key: 'bi.secret',
+        value: blindIndex,
+      });
+      expect(frame.fields.find((field) => field.name === 'tags')!.values[0]).toContainEqual({
+        key: 'enc.secret',
+        value: ciphertext,
+      });
     });
   });
 });
