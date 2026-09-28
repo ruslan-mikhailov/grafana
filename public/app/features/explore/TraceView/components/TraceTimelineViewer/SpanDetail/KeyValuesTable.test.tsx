@@ -520,3 +520,99 @@ describe('Tempo protected span attributes', () => {
     expect(valueCell.querySelector('img')).toBeNull();
   });
 });
+
+describe('Keyless Tempo span ciphertext', () => {
+  const originalRegistry = Reflect.get(globalThis, displayRegistrySymbol);
+
+  afterEach(() => {
+    if (originalRegistry === undefined) {
+      Reflect.deleteProperty(globalThis, displayRegistrySymbol);
+    } else {
+      Reflect.set(globalThis, displayRegistrySymbol, originalRegistry);
+    }
+    mockCopyTextToClipboard.mockClear();
+  });
+
+  it('toggles raw ciphertext and copies the visible value without changing rows or nesting links and promos', async () => {
+    const user = userEvent.setup();
+    const row = { key: 'enc.secret', value: encryptedValue };
+    const registry = { epoch: 1, resolve: jest.fn(() => '[encrypted: key unavailable]') };
+    Reflect.set(globalThis, displayRegistrySymbol, registry);
+    setup({
+      data: [row],
+      datasourceType: 'tempo',
+      isSpanAttribute: true,
+      linksGetter: () => [{ path: '/search', title: 'Search' }],
+      promoGetter: () => ({
+        pluginId: 'grafana-dbo11y-app',
+        icon: 'database-observability',
+        title: 'Explore',
+        body: 'body',
+        match: () => true,
+      }),
+    });
+
+    const show = screen.getByRole('button', { name: 'Show encrypted value for enc.secret' });
+    expect(show).toHaveTextContent('[encrypted: key unavailable] · Show ciphertext');
+    expect(show.closest('a')).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Search' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('attribute-plugin-promo-trigger')).not.toBeInTheDocument();
+    expect(screen.queryByText(encryptedValue)).not.toBeInTheDocument();
+    await user.tab();
+    expect(show).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByText(encryptedValue).closest('button, a')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Hide encrypted value for enc.secret' })).toHaveTextContent(
+      'Hide ciphertext'
+    );
+    await user.click(screen.getByRole('button', { name: 'Copy to clipboard' }));
+    expect(mockCopyTextToClipboard).toHaveBeenCalledWith(encryptedValue);
+    expect(row.value).toBe(encryptedValue);
+    await user.click(screen.getByRole('button', { name: 'Hide encrypted value for enc.secret' }));
+    expect(screen.getByRole('button', { name: 'Show encrypted value for enc.secret' })).toHaveTextContent(
+      '[encrypted: key unavailable] · Show ciphertext'
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Show encrypted value for enc.secret' }));
+    act(() => {
+      registry.epoch++;
+      window.dispatchEvent(new Event('grafana.tempo.protected-attribute-display-change'));
+    });
+    expect(screen.getByRole('button', { name: 'Show encrypted value for enc.secret' })).toHaveTextContent(
+      '[encrypted: key unavailable] · Show ciphertext'
+    );
+  });
+
+  it('does not offer reveal outside canonical Tempo span values or for invalid ciphertext', () => {
+    const registry = { epoch: 1, resolve: jest.fn(() => '[encrypted: key unavailable]') };
+    Reflect.set(globalThis, displayRegistrySymbol, registry);
+    const { rerender } = setup({
+      data: [{ key: 'enc.secret', value: encryptedValue }],
+      datasourceType: 'jaeger',
+      isSpanAttribute: true,
+    });
+    expect(screen.queryByRole('button', { name: /encrypted value/ })).not.toBeInTheDocument();
+    rerender(
+      <KeyValuesTable
+        data={[{ key: 'enc.secret', value: encryptedValue }]}
+        datasourceType="tempo"
+        isSpanAttribute={false}
+      />
+    );
+    expect(screen.queryByRole('button', { name: /encrypted value/ })).not.toBeInTheDocument();
+    rerender(
+      <KeyValuesTable
+        data={[{ key: 'enc.secret', value: `${encryptedValue}=` }]}
+        datasourceType="tempo"
+        isSpanAttribute
+      />
+    );
+    expect(screen.queryByRole('button', { name: /encrypted value/ })).not.toBeInTheDocument();
+    registry.resolve.mockReturnValue('[encrypted: invalid data]');
+    rerender(
+      <KeyValuesTable data={[{ key: 'enc.secret', value: encryptedValue }]} datasourceType="tempo" isSpanAttribute />
+    );
+    expect(screen.getByText('[encrypted: invalid data]')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /encrypted value/ })).not.toBeInTheDocument();
+  });
+});

@@ -254,4 +254,51 @@ describe('protected attributes in categorized span detail', () => {
     expect(screen.getByText(encryptedValue)).toBeInTheDocument();
     expect(data[0].value).toBe(encryptedValue);
   });
+  it('reveals only the selected ciphertext in the collapsed summary and expanded table', async () => {
+    const user = userEvent.setup();
+    const data = [
+      { key: 'enc.first', value: encryptedValue },
+      { key: 'enc.second', value: encryptedValue },
+    ];
+    Reflect.set(globalThis, displayRegistrySymbol, {
+      epoch: 1,
+      resolve: () => '[encrypted: key unavailable]',
+    });
+    const { rerender } = render(
+      <AccordionCategorizedKeyValues
+        data={data}
+        sectionType="span"
+        datasourceType="tempo"
+        isOpen={false}
+        label="Span attributes"
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Show encrypted value for enc.first' }));
+    expect(screen.getByRole('button', { name: 'Hide encrypted value for enc.first' })).toHaveTextContent(
+      'Hide ciphertext'
+    );
+    expect(screen.getByRole('button', { name: 'Show encrypted value for enc.second' })).toHaveTextContent(
+      '[encrypted: key unavailable] · Show ciphertext'
+    );
+    expect(screen.getByText(encryptedValue).closest('button, a')).toBeNull();
+
+    rerender(
+      <AccordionCategorizedKeyValues
+        data={data}
+        sectionType="span"
+        datasourceType="tempo"
+        isOpen={true}
+        label="Span attributes"
+      />
+    );
+    expect(screen.queryByText(encryptedValue)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Show encrypted value for enc.second' }));
+    expect(screen.getByRole('button', { name: 'Show encrypted value for enc.first' })).toHaveTextContent(
+      '[encrypted: key unavailable] · Show ciphertext'
+    );
+    expect(screen.getByText(encryptedValue).closest('button, a')).toBeNull();
+    expect(data[0].value).toBe(encryptedValue);
+    expect(data[1].value).toBe(encryptedValue);
+  });
 });

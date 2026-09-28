@@ -1,7 +1,7 @@
 import { css } from '@emotion/css';
 import { clsx } from 'clsx';
 import memoize from 'micro-memoize';
-import { useSyncExternalStore } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 
 import {
   formattedValueToString,
@@ -16,19 +16,61 @@ import { getActiveCellSelector, isTableCellStylesKeyEqual } from '../styles';
 import { type AutoCellProps, type TableCellStyleOptions, type TableCellStyles } from '../types';
 
 export function AutoCell({ value, field, rowIdx }: AutoCellProps) {
-  useSyncExternalStore(
+  const epoch = useSyncExternalStore(
     subscribeProtectedAttributeDisplay,
     getProtectedAttributeDisplayEpoch,
     getProtectedAttributeDisplayEpoch
   );
-  const formattedValue =
-    getProtectedAttributeDisplayValue(field.name, value) ?? formattedValueToString(field.display!(value));
+  const [revealed, setRevealed] = useState<{ field: string; raw: string; epoch: number } | null>(null);
+  const displayValue = getProtectedAttributeDisplayValue(field.name, value);
+  if (displayValue === '[encrypted: key unavailable]' && typeof value === 'string') {
+    const isRevealed = revealed?.field === field.name && revealed.raw === value && revealed.epoch === epoch;
+    return (
+      <>
+        {isRevealed && <span className={ciphertextText}>{value}</span>}
+        {isRevealed && ' '}
+        <button
+          type="button"
+          className={ciphertextButton}
+          aria-label={`${isRevealed ? 'Hide' : 'Show'} encrypted value for ${field.name}`}
+          aria-pressed={isRevealed}
+          onClick={() => setRevealed(isRevealed ? null : { field: field.name, raw: value, epoch })}
+        >
+          {isRevealed ? 'Hide ciphertext' : `${displayValue} · Show ciphertext`}
+        </button>
+      </>
+    );
+  }
+  const formattedValue = displayValue ?? formattedValueToString(field.display!(value));
   return (
     <MaybeWrapWithLink field={field} rowIdx={rowIdx}>
       {formattedValue}
     </MaybeWrapWithLink>
   );
 }
+
+const ciphertextButton = css({
+  background: 'none',
+  border: 0,
+  color: 'inherit',
+  cursor: 'pointer',
+  font: 'inherit',
+  padding: 0,
+  textAlign: 'inherit',
+  textDecoration: 'underline',
+  textUnderlineOffset: '2px',
+  '&:focus-visible': {
+    outline: '2px solid currentColor',
+    outlineOffset: '2px',
+  },
+  whiteSpace: 'inherit',
+  overflowWrap: 'anywhere',
+});
+
+const ciphertextText = css({
+  overflowWrap: 'anywhere',
+  userSelect: 'text',
+});
 
 /**
  * `pre-line` collapses runs of whitespace, which suits prose but flattens the indentation a JSON

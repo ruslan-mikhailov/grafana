@@ -150,6 +150,25 @@ const getStyles = (theme: GrafanaTheme2) => {
       // to wrap long unbroken values. `overflow-wrap: break-word` does not, and restores the scrollbar.
       wordBreak: 'break-word',
     }),
+    ciphertextButton: css({
+      background: 'none',
+      border: 0,
+      color: theme.colors.text.link,
+      cursor: 'pointer',
+      font: 'inherit',
+      padding: 0,
+      textAlign: 'inherit',
+      textDecoration: 'underline',
+      textUnderlineOffset: '2px',
+      '&:focus-visible': {
+        outline: '2px solid currentColor',
+        outlineOffset: '2px',
+      },
+    }),
+    ciphertextText: css({
+      overflowWrap: 'anywhere',
+      userSelect: 'text',
+    }),
   };
 };
 
@@ -363,12 +382,21 @@ export type KeyValuesTableProps = {
 };
 
 export default function KeyValuesTable(props: KeyValuesTableProps) {
-  const { data, linksGetter, onlyValues, promoGetter, datasourceType, openLinksInSameTab = false, isSpanAttribute } = props;
-  useSyncExternalStore(
+  const {
+    data,
+    linksGetter,
+    onlyValues,
+    promoGetter,
+    datasourceType,
+    openLinksInSameTab = false,
+    isSpanAttribute,
+  } = props;
+  const epoch = useSyncExternalStore(
     subscribeProtectedAttributeDisplay,
     getProtectedAttributeDisplayEpoch,
     getProtectedAttributeDisplayEpoch
   );
+  const [revealed, setRevealed] = useState<Record<number, { field: string; raw: string; epoch: number }>>({});
   const styles = useStyles2(getStyles);
   return (
     <div className={cx(styles.KeyValueTable)} data-testid="KeyValueTable">
@@ -379,6 +407,13 @@ export default function KeyValuesTable(props: KeyValuesTableProps) {
               datasourceType === 'tempo' && isSpanAttribute
                 ? getProtectedAttributeDisplayValue(row.key, row.value)
                 : undefined;
+            const canReveal = displayValue === '[encrypted: key unavailable]' && typeof row.value === 'string';
+            const isRevealed =
+              canReveal &&
+              revealed[i]?.field === row.key &&
+              revealed[i].raw === row.value &&
+              revealed[i].epoch === epoch;
+            const visibleValue = isRevealed ? row.value : displayValue;
             let html = '';
             if (displayValue === undefined) {
               if (row.type === 'code') {
@@ -393,28 +428,55 @@ export default function KeyValuesTable(props: KeyValuesTableProps) {
             const jsonTable =
               displayValue === undefined ? (
                 <div className={styles.jsonTable} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />
+              ) : canReveal ? (
+                <div className={styles.jsonTable} style={{ whiteSpace: 'pre-wrap' }}>
+                  {isRevealed && <span className={styles.ciphertextText}>{row.value}</span>}
+                  {isRevealed && ' '}
+                  <button
+                    type="button"
+                    className={styles.ciphertextButton}
+                    aria-label={`${isRevealed ? 'Hide' : 'Show'} encrypted value for ${row.key}`}
+                    aria-pressed={isRevealed}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setRevealed((current) => {
+                        const next = { ...current };
+                        if (isRevealed) {
+                          delete next[i];
+                        } else {
+                          next[i] = { field: row.key, raw: row.value, epoch };
+                        }
+                        return next;
+                      });
+                    }}
+                  >
+                    {isRevealed ? 'Hide ciphertext' : `${displayValue} · Show ciphertext`}
+                  </button>
+                </div>
               ) : (
                 <div className={styles.jsonTable} style={{ whiteSpace: 'pre-wrap' }}>
                   {displayValue}
                 </div>
               );
             const links = linksGetter?.(data, i) ?? [];
-            let valueMarkup =
-              links.length > 1 ? (
-                <LinkValuesMenu links={links} datasourceType={datasourceType} openLinksInSameTab={openLinksInSameTab}>
-                  {jsonTable}
-                </LinkValuesMenu>
-              ) : links.length === 1 ? (
-                <LinkValue link={links[0]} datasourceType={datasourceType} openLinksInSameTab={openLinksInSameTab}>
-                  {jsonTable}
-                </LinkValue>
-              ) : (
-                jsonTable
-              );
+            let valueMarkup: ReactNode = canReveal ? (
+              jsonTable
+            ) : links.length > 1 ? (
+              <LinkValuesMenu links={links} datasourceType={datasourceType} openLinksInSameTab={openLinksInSameTab}>
+                {jsonTable}
+              </LinkValuesMenu>
+            ) : links.length === 1 ? (
+              <LinkValue link={links[0]} datasourceType={datasourceType} openLinksInSameTab={openLinksInSameTab}>
+                {jsonTable}
+              </LinkValue>
+            ) : (
+              jsonTable
+            );
 
             // Skip promo when value markup already has an anchor (jsonMarkup auto-linkifies
             // http(s) strings) to avoid nesting interactive content inside the promo <button>.
-            const promo = links.length === 0 && !html.includes('<a ') ? promoGetter?.(row.key) : undefined;
+            const promo =
+              !canReveal && links.length === 0 && !html.includes('<a ') ? promoGetter?.(row.key) : undefined;
             if (promo) {
               valueMarkup = <AttributePluginPromoTip promo={promo}>{valueMarkup}</AttributePluginPromoTip>;
             }
@@ -432,7 +494,7 @@ export default function KeyValuesTable(props: KeyValuesTableProps) {
                   <CopyIcon
                     className={styles.copyIcon}
                     copyText={
-                      displayValue ??
+                      visibleValue ??
                       (row.type === 'code' || row.type === 'text' ? row.value : JSON.stringify(row, null, 2))
                     }
                     tooltipTitle="Copy"
